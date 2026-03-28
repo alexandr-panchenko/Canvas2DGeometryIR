@@ -1,0 +1,19 @@
+{
+  "name": "canvas2d-geometry-ir",
+  "version": "0.1.0",
+  "description": "Deterministic Canvas-like recording and geometry IR engine",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}

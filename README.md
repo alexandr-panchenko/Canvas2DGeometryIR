@@ -1,12 +1,137 @@
 # Canvas2DGeometryIR
 
-A Bun + TypeScript library for deterministic 2D vector composition, structured geometry, and render replay.
+`Canvas2DGeometryIR` is a standalone Bun + TypeScript library for deterministic 2D vector composition, structured geometry inspection, and replay rendering.
 
-## Goals
+It provides a **Canvas-like recording API** that does **not** draw pixels while composing. Instead, the context records paths and paint operations into a structured, JSON-safe intermediate representation (IR). Geometry operations and replay are derived from that IR.
 
-- Canvas-like recording API
-- geometry-first output
-- JSON-safe serialization
-- replay to real canvas-like targets
-- strict typing
-- minimal dependencies
+## v1 scope
+
+- Path recording (`moveTo`, `lineTo`, `bezierCurveTo`, `quadraticCurveTo`, `arc`, `closePath`)
+- Fills and strokes
+- Transform operations (`translate`, `scale`, `rotate`, `setTransform`, `resetTransform`)
+- State stack (`save`, `restore`)
+- Replay to an injected canvas-like target
+- Geometry queries
+  - axis-aligned bounds
+  - point hit testing
+  - path intersections (flattened)
+  - closest-point on boundaries
+  - anchor/anchor-candidate extraction
+  - path inspection (segment kinds, subpath count)
+- JSON-safe serialization/deserialization with Zod validation
+
+Text rendering is intentionally out of scope for v1.
+
+## Installation
+
+```bash
+bun install
+```
+
+## Scripts
+
+```bash
+bun run typecheck
+bun test
+bun run build
+```
+
+## Quick usage
+
+```ts
+import {
+  Canvas2DGeometryIRContext,
+  GeometryEngine,
+  replayDocument,
+  serializeDocument,
+  deserializeDocument,
+} from "canvas2d-geometry-ir";
+
+const ctx = new Canvas2DGeometryIRContext();
+ctx.beginPath();
+ctx.moveTo(0, 0);
+ctx.lineTo(100, 0);
+ctx.lineTo(100, 100);
+ctx.closePath();
+ctx.fillStyle = "#0ea5e9";
+ctx.fill();
+
+const doc = ctx.getDocument();
+const engine = new GeometryEngine(doc);
+
+console.log(engine.getBounds());
+console.log(engine.hitTestPoint({ x: 20, y: 20 }));
+console.log(engine.closestPoint({ x: 105, y: 30 }));
+console.log(engine.getAnchorCandidates());
+
+const json = serializeDocument(doc);
+const roundtrip = deserializeDocument(json);
+
+// replayDocument(roundtrip, yourCanvasLikeTarget)
+```
+
+## Replay target contract
+
+Replay stays independent of browser/DOM APIs. A host can adapt any backend by implementing:
+
+- `beginPath`, `moveTo`, `lineTo`, `bezierCurveTo`, `arc`, `closePath`
+- `fill`, `stroke`
+- `setFillStyle`, `setStrokeStyle`, `setLineWidth`
+
+## Determinism
+
+- IR emission order is stable.
+- Draw operations receive stable generated IDs (`op-0`, `op-1`, ...).
+- Serialization output is JSON-safe and deterministic for equivalent command streams.
+
+## Geometry model
+
+Each path is composed from ordered subpaths and segments. Segment kinds are:
+
+- `line`
+- `bezier` (cubic)
+- `arc`
+
+Segment-level operations are implemented and composed upward for path/document-level queries.
+
+## Serialization
+
+Use:
+
+- `serializeDocument(document): string`
+- `deserializeDocument(json): GeometryDocument`
+
+Deserialization validates with Zod schemas to prevent untyped data from leaking into geometry code.
+
+## Examples
+
+See `examples/basic.ts`.
+
+Run it with:
+
+```bash
+bun run examples/basic.ts
+```
+
+## Performance notes (v1)
+
+Current implementation favors clarity and correctness.
+
+Hotspots to optimize later if needed:
+
+1. Bézier/arc flattening used by hit tests and intersections.
+2. Repeated path flattening in repeated queries.
+3. Repeated bounds recomputation across immutable documents.
+
+Safe future improvements:
+
+- Cache flattened polylines per segment/path with tolerance keying.
+- Cache per-op and full-document bounds.
+- Add broad-phase spatial bucketing for hit and intersection queries.
+
+## Non-goals for v1
+
+- Full browser Canvas API fidelity
+- Text layout/rendering
+- DOM-specific dependencies
+- Speculative plugin framework internals
