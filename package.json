@@ -8,7 +8,9 @@
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target bun",
     "test": "bun test",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "bunx tsc --noEmit",
+    "playground:build": "bun run playground/build.ts",
+    "playground:serve": "bun run playground/server.ts"
   },
   "dependencies": {
     "zod": "^3.24.1"

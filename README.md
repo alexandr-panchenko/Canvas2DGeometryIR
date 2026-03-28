@@ -34,6 +34,8 @@ bun install
 bun run typecheck
 bun test
 bun run build
+bun run playground:build
+bun run playground:serve
 ```
 
 ## Quick usage
@@ -69,6 +71,40 @@ const roundtrip = deserializeDocument(json);
 
 // replayDocument(roundtrip, yourCanvasLikeTarget)
 ```
+
+## Browser playground (manual verification + bug capture)
+
+A lightweight browser playground now ships in `playground/` for realistic manual verification of:
+
+- selecting visible paths
+- dragging selected paths
+- editing path/control points
+- inspecting bounds and anchor overlays
+- exporting reproducible bug cases (scene + tool state + interaction trace)
+
+### Run locally
+
+```bash
+bun run playground:serve
+```
+
+Then open the printed local URL (default `http://localhost:4070`).
+
+### Bug-capture workflow
+
+1. Load one of the built-in scenes.
+2. Reproduce the incorrect interaction (selection, drag, point editing, etc.).
+3. Click **Export Bug Case**.
+4. Paste the exported JSON artifact into your bug report.
+
+The export includes:
+
+- current scene data
+- derived geometry document
+- current tool state
+- recent structured interaction log
+
+This makes failures reproducible without manually authoring numeric geometry expectations.
 
 ## Replay target contract
 
