@@ -90,88 +90,99 @@ Do not try to build everything at once.
 ## Phase checklist
 
 ### Phase 0 — Repository setup
-- [ ] Initialize Bun project
-- [ ] Add strict TypeScript config
-- [ ] Add Bun test setup
-- [ ] Add README stub
-- [ ] Add AGENTS.md
-- [ ] Add initial source/module layout
-- [ ] Ensure project builds and tests run
+- [x] Initialize Bun project
+- [x] Add strict TypeScript config
+- [x] Add Bun test setup
+- [x] Add README stub
+- [x] Add AGENTS.md
+- [x] Add initial source/module layout
+- [x] Ensure project builds and tests run
 
 ### Phase 1 — Core types and IR skeleton
-- [ ] Define core math/types (`Point`, `Rect`, `Matrix`, etc.)
-- [ ] Define segment model types
-- [ ] Define path model types
-- [ ] Define initial IR shape
-- [ ] Decide which parts of IR are mutable during recording vs immutable after finalize
-- [ ] Add tests for basic IR construction
+- [x] Define core math/types (`Point`, `Rect`, `Matrix`, etc.)
+- [x] Define segment model types
+- [x] Define path model types
+- [x] Define initial IR shape
+- [x] Decide which parts of IR are mutable during recording vs immutable after finalize
+- [x] Add tests for basic IR construction
 
 ### Phase 2 — Recording context
-- [ ] Implement Canvas-like recording context skeleton
-- [ ] Support state stack (`save` / `restore`)
-- [ ] Support current transform state
-- [ ] Support current path lifecycle (`beginPath`, `closePath`, etc.)
-- [ ] Support line/path construction commands
-- [ ] Support style state needed for fill/stroke
-- [ ] Convert recorded commands into structured IR
-- [ ] Add tests for deterministic recording behavior
+- [x] Implement Canvas-like recording context skeleton
+- [x] Support state stack (`save` / `restore`)
+- [x] Support current transform state
+- [x] Support current path lifecycle (`beginPath`, `closePath`, etc.)
+- [x] Support line/path construction commands
+- [x] Support style state needed for fill/stroke
+- [x] Convert recorded commands into structured IR
+- [x] Add tests for deterministic recording behavior
 
 ### Phase 3 — Segment implementations
-- [ ] Implement line segment geometry
-- [ ] Implement Bézier segment geometry
-- [ ] Implement arc segment geometry
-- [ ] Decide whether to use `bezier-js` or internal Bézier utilities
-- [ ] Add tests for segment-level bounds
-- [ ] Add tests for segment-level closest-point behavior where applicable
+- [x] Implement line segment geometry
+- [x] Implement Bézier segment geometry
+- [x] Implement arc segment geometry
+- [x] Decide whether to use `bezier-js` or internal Bézier utilities
+- [x] Add tests for segment-level bounds
+- [x] Add tests for segment-level closest-point behavior where applicable
 
 ### Phase 4 — Path composition and bounds
-- [ ] Build path-level geometry from segments
-- [ ] Implement axis-aligned bounds for paths
-- [ ] Handle transforms correctly in bounds computation
-- [ ] Add tests for transformed bounds
-- [ ] Add tests for composite path bounds
+- [x] Build path-level geometry from segments
+- [x] Implement axis-aligned bounds for paths
+- [x] Handle transforms correctly in bounds computation
+- [x] Add tests for transformed bounds
+- [x] Add tests for composite path bounds
 
 ### Phase 5 — Replay rendering
-- [ ] Define replay target interface
-- [ ] Implement replay from IR to injected canvas-like target
-- [ ] Keep replay independent of DOM/browser globals
-- [ ] Add tests using fake replay targets
-- [ ] Add one or two manual examples for replay behavior
+- [x] Define replay target interface
+- [x] Implement replay from IR to injected canvas-like target
+- [x] Keep replay independent of DOM/browser globals
+- [x] Add tests using fake replay targets
+- [x] Add one or two manual examples for replay behavior
 
 ### Phase 6 — Hit testing
-- [ ] Implement point hit testing for fills
-- [ ] Implement point hit testing for strokes
-- [ ] Define exact supported semantics and limitations
-- [ ] Add tests for common hit-test cases
-- [ ] Add tests for transformed objects
+- [x] Implement point hit testing for fills
+- [x] Implement point hit testing for strokes
+- [x] Define exact supported semantics and limitations
+- [x] Add tests for common hit-test cases
+- [x] Add tests for transformed objects
 
 ### Phase 7 — Closest-point queries
-- [ ] Implement closest-point queries for line segments
-- [ ] Implement closest-point queries for Bézier segments
-- [ ] Implement closest-point queries for arcs
-- [ ] Expose path-level closest-point query
-- [ ] Add tests for representative cases
+- [x] Implement closest-point queries for line segments
+- [x] Implement closest-point queries for Bézier segments
+- [x] Implement closest-point queries for arcs
+- [x] Expose path-level closest-point query
+- [x] Add tests for representative cases
 
 ### Phase 8 — Anchors
-- [ ] Define default anchor extraction strategy
-- [ ] Expose anchor candidates from shapes/paths
-- [ ] Keep anchor strategy simple and deterministic in v1
-- [ ] Add tests for anchor extraction
+- [x] Define default anchor extraction strategy
+- [x] Expose anchor candidates from shapes/paths
+- [x] Keep anchor strategy simple and deterministic in v1
+- [x] Add tests for anchor extraction
 
 ### Phase 9 — Serialization
-- [ ] Define JSON-safe serialization format
-- [ ] Implement `toJSON`
-- [ ] Implement `fromJSON`
-- [ ] Add roundtrip tests
-- [ ] Ensure no executable values leak into serialized output
+- [x] Define JSON-safe serialization format
+- [x] Implement `toJSON`
+- [x] Implement `fromJSON`
+- [x] Add roundtrip tests
+- [x] Ensure no executable values leak into serialized output
 
 ### Phase 10 — API cleanup and examples
-- [ ] Review public API
-- [ ] Remove accidental abstractions
-- [ ] Add examples for common usage
-- [ ] Expand README with supported feature subset
-- [ ] Document known limitations
-- [ ] Add brief performance notes / obvious future optimization points
+- [x] Review public API
+- [x] Remove accidental abstractions
+- [x] Add examples for common usage
+- [x] Expand README with supported feature subset
+- [x] Document known limitations
+- [x] Add brief performance notes / obvious future optimization points
+
+### Phase 11 — Browser playground for manual verification and bug capture
+- [x] Add browser playground scaffold using Bun + TypeScript
+- [x] Load and render built-in scenes
+- [x] Select path by clicking visible geometry
+- [x] Drag selected path
+- [x] Edit path points/control points (basic)
+- [x] Record structured interaction events
+- [x] Export bug-case artifact (scene + tool state + event log + geometry document)
+- [x] Add tests for export/serialization and deterministic built-in scenes
+- [x] Document how to run playground and capture bug reports
 
 ---
 
@@ -187,10 +198,10 @@ Decision should be pragmatic based on correctness, simplicity, and performance.
 
 Status:
 - [ ] unresolved
-- [ ] resolved
+- [x] resolved
 
 Notes:
--
+- Internal math utilities are currently sufficient; no external Bézier dependency added.
 
 ### Text support
 Should text be:
@@ -202,43 +213,48 @@ Default assumption: out of scope for v1.
 
 Status:
 - [ ] unresolved
-- [ ] resolved
+- [x] resolved
 
 Notes:
--
+- Kept out of scope in current implementation.
 
 ### Replay target shape
 How closely should replay target mirror Canvas 2D?
 
 Status:
 - [ ] unresolved
-- [ ] resolved
+- [x] resolved
 
 Notes:
--
+- Current replay target mirrors a focused subset of Canvas 2D path + paint APIs.
 
 ### Anchor model
 How rich should anchor extraction be in v1?
 
 Status:
 - [ ] unresolved
-- [ ] resolved
+- [x] resolved
 
 Notes:
--
+- Vertex and arc-extreme candidates are exposed as deterministic default anchors.
 
 ---
 
 ## Current status
 
 ### Completed
-- None yet
+- Core recording, geometry, replay, and serialization phases.
+- Browser playground milestone for manual verification and reproducible bug capture.
 
 ### In progress
-- None yet
+- None.
 
 ### Blocked
-- None yet
+- None.
+
+### Known limitations
+- Playground currently supports a single-canvas workspace with utilitarian controls (intentionally minimal).
+- Export includes scene + interaction trace for replay/debug reasoning, but does not yet include an automated interaction replayer.
 
 ---
 
