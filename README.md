@@ -38,6 +38,8 @@ bun run playground:build
 bun run playground:serve
 ```
 
+`bun run playground:build` emits a static site in `playground/site`, which is the artifact used for GitHub Pages deployment.
+
 ## Quick usage
 
 ```ts
@@ -89,6 +91,18 @@ bun run playground:serve
 ```
 
 Then open the printed local URL (default `http://localhost:4070`).
+
+### GitHub Pages deployment
+
+The repository now includes `/.github/workflows/deploy-playground.yml`, which builds the static playground and deploys it to GitHub Pages on pushes to `main`.
+
+To enable it in GitHub:
+
+1. Open the repository settings.
+2. Go to **Pages**.
+3. Set **Source** to **GitHub Actions**.
+
+After that, each push to `main` will publish the latest playground build.
 
 ### Bug-capture workflow
 
