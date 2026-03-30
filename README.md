@@ -78,11 +78,12 @@ const roundtrip = deserializeDocument(json);
 
 A lightweight browser playground now ships in `playground/` for realistic manual verification of:
 
-- selecting visible paths
-- dragging selected paths
-- editing path/control points
+- selecting visible paths or grouped shapes
+- dragging path bodies directly
+- editing anchors and control points directly
+- interactively adding line, arc, and Bezier segments
 - inspecting bounds and anchor overlays
-- exporting reproducible bug cases (scene + tool state + interaction trace)
+- exporting reproducible scenes (scene + tool state + concise click trace)
 
 ### Run locally
 
@@ -107,16 +108,17 @@ After that, each push to `main` will publish the latest playground build.
 ### Bug-capture workflow
 
 1. Load one of the built-in scenes.
-2. Reproduce the incorrect interaction (selection, drag, point editing, etc.).
-3. Click **Export Bug Case**.
+2. Reproduce the incorrect interaction (selection, drag, point editing, grouping, etc.).
+3. Click **Export Scene**.
 4. Paste the exported JSON artifact into your bug report.
 
 The export includes:
 
 - current scene data
+- ordered scene commands
 - derived geometry document
 - current tool state
-- recent structured interaction log
+- recent click-only interaction log
 
 This makes failures reproducible without manually authoring numeric geometry expectations.
 

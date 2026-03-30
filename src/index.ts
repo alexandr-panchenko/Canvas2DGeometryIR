@@ -19,4 +19,16 @@ export type { CanvasLikeReplayTarget } from "./replay";
 
 export { builtInScenes, getBuiltInScene } from "./playground/fixtures";
 export { createBugCaseExport, serializeBugCaseExport, serializeBugCaseExportWithDocumentString } from "./playground/export";
-export type { BugCaseExport, InteractionEvent, PlaygroundScene, ScenePath, SceneSegment, ToolMode, ToolStateSnapshot } from "./playground/types";
+export { buildSceneCommands, resolveArcThroughPoint, sceneToDocument, syncSceneCommands } from "./playground/scene";
+export type {
+  BugCaseExport,
+  InteractionEvent,
+  PlaygroundScene,
+  SceneCommand,
+  ScenePaintMode,
+  ScenePath,
+  SceneSegment,
+  SceneShape,
+  SceneStyle,
+  ToolStateSnapshot,
+} from "./playground/types";

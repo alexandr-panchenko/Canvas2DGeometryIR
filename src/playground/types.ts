@@ -1,55 +1,92 @@
 import { z } from "zod";
 import { geometryDocumentZodSchema } from "../serialization";
-import type { DrawOp, GeometryDocument, Point } from "../types";
+import type { GeometryDocument, Point } from "../types";
+
+export type ScenePaintMode = "fill" | "stroke" | "fill-stroke";
+
+export interface SceneStyle {
+  fillStyle: string;
+  strokeStyle: string;
+  lineWidth: number;
+}
 
 export type SceneSegment =
   | { readonly kind: "line"; to: Point }
   | { readonly kind: "bezier"; cp1: Point; cp2: Point; to: Point }
-  | {
-      readonly kind: "arc";
-      center: Point;
-      to: Point;
-      radius: number;
-      startAngle: number;
-      endAngle: number;
-      counterclockwise: boolean;
-    };
+  | { readonly kind: "arc"; control: Point; to: Point };
 
 export interface ScenePath {
   id: string;
-  paint: "fill" | "stroke";
-  style: { fillStyle: string; strokeStyle: string; lineWidth: number };
+  name: string;
+  style: SceneStyle;
+  paint: ScenePaintMode;
   start: Point;
   segments: SceneSegment[];
   closed: boolean;
+  shapeId: string | null;
 }
+
+export interface SceneShape {
+  id: string;
+  name: string;
+  pathIds: string[];
+  style: SceneStyle;
+  paint: ScenePaintMode;
+}
+
+export type SceneCommand =
+  | { readonly id: string; readonly kind: "beginPath"; readonly targetId: string; readonly targetType: "path" | "shape" }
+  | { readonly id: string; readonly kind: "moveTo"; readonly x: number; readonly y: number; readonly pathId: string }
+  | { readonly id: string; readonly kind: "lineTo"; readonly x: number; readonly y: number; readonly pathId: string; readonly segmentIndex: number }
+  | {
+      readonly id: string;
+      readonly kind: "bezierCurveTo";
+      readonly cp1: Point;
+      readonly cp2: Point;
+      readonly to: Point;
+      readonly pathId: string;
+      readonly segmentIndex: number;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "arc";
+      readonly center: Point | null;
+      readonly radius: number | null;
+      readonly startAngle: number | null;
+      readonly endAngle: number | null;
+      readonly counterclockwise: boolean | null;
+      readonly valid: boolean;
+      readonly pathId: string;
+      readonly segmentIndex: number;
+    }
+  | { readonly id: string; readonly kind: "closePath"; readonly pathId: string }
+  | { readonly id: string; readonly kind: "fill"; readonly targetId: string; readonly style: SceneStyle }
+  | { readonly id: string; readonly kind: "stroke"; readonly targetId: string; readonly style: SceneStyle };
 
 export interface PlaygroundScene {
   id: string;
   name: string;
   paths: ScenePath[];
+  shapes: SceneShape[];
+  commands: SceneCommand[];
 }
 
-export type ToolMode = "select" | "edit-points";
-
 export interface ToolStateSnapshot {
-  readonly mode: ToolMode;
   readonly selectedPathId: string | null;
+  readonly selectedPathIds: readonly string[];
   readonly selectedHandleId: string | null;
+  readonly selectedCommandId: string | null;
   readonly showBounds: boolean;
   readonly showAnchors: boolean;
 }
 
-export type InteractionEvent =
-  | { readonly type: "pointer-down"; readonly at: number; readonly x: number; readonly y: number; readonly target: string | null }
-  | { readonly type: "pointer-move"; readonly at: number; readonly x: number; readonly y: number }
-  | { readonly type: "pointer-up"; readonly at: number; readonly x: number; readonly y: number }
-  | { readonly type: "tool-mode-changed"; readonly at: number; readonly mode: ToolMode }
-  | { readonly type: "selection-changed"; readonly at: number; readonly selectedPathId: string | null }
-  | { readonly type: "drag-start"; readonly at: number; readonly kind: "path" | "handle"; readonly targetId: string }
-  | { readonly type: "drag-move"; readonly at: number; readonly kind: "path" | "handle"; readonly targetId: string; readonly dx: number; readonly dy: number }
-  | { readonly type: "drag-end"; readonly at: number; readonly kind: "path" | "handle"; readonly targetId: string }
-  | { readonly type: "scene-mutated"; readonly at: number; readonly mutation: string; readonly pathId: string };
+export interface InteractionEvent {
+  readonly type: "click";
+  readonly at: number;
+  readonly x: number;
+  readonly y: number;
+  readonly target: "path" | "control-point" | "empty";
+}
 
 export interface BugCaseExport {
   readonly schemaVersion: 1;
@@ -61,49 +98,86 @@ export interface BugCaseExport {
 }
 
 const pointSchema = z.object({ x: z.number(), y: z.number() });
+const sceneStyleSchema = z.object({
+  fillStyle: z.string(),
+  strokeStyle: z.string(),
+  lineWidth: z.number(),
+});
+
 const lineSchema = z.object({ kind: z.literal("line"), to: pointSchema });
 const bezierSchema = z.object({ kind: z.literal("bezier"), cp1: pointSchema, cp2: pointSchema, to: pointSchema });
-const arcSchema = z.object({
-  kind: z.literal("arc"),
-  center: pointSchema,
-  to: pointSchema,
-  radius: z.number(),
-  startAngle: z.number(),
-  endAngle: z.number(),
-  counterclockwise: z.boolean(),
-});
+const arcSchema = z.object({ kind: z.literal("arc"), control: pointSchema, to: pointSchema });
 
 const scenePathSchema = z.object({
   id: z.string(),
-  paint: z.enum(["fill", "stroke"]),
-  style: z.object({ fillStyle: z.string(), strokeStyle: z.string(), lineWidth: z.number() }),
+  name: z.string(),
+  style: sceneStyleSchema,
+  paint: z.enum(["fill", "stroke", "fill-stroke"]),
   start: pointSchema,
   segments: z.array(z.discriminatedUnion("kind", [lineSchema, bezierSchema, arcSchema])),
   closed: z.boolean(),
+  shapeId: z.string().nullable(),
 });
+
+const sceneShapeSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  pathIds: z.array(z.string()),
+  style: sceneStyleSchema,
+  paint: z.enum(["fill", "stroke", "fill-stroke"]),
+});
+
+const sceneCommandSchema = z.discriminatedUnion("kind", [
+  z.object({ id: z.string(), kind: z.literal("beginPath"), targetId: z.string(), targetType: z.enum(["path", "shape"]) }),
+  z.object({ id: z.string(), kind: z.literal("moveTo"), x: z.number(), y: z.number(), pathId: z.string() }),
+  z.object({ id: z.string(), kind: z.literal("lineTo"), x: z.number(), y: z.number(), pathId: z.string(), segmentIndex: z.number() }),
+  z.object({
+    id: z.string(),
+    kind: z.literal("bezierCurveTo"),
+    cp1: pointSchema,
+    cp2: pointSchema,
+    to: pointSchema,
+    pathId: z.string(),
+    segmentIndex: z.number(),
+  }),
+  z.object({
+    id: z.string(),
+    kind: z.literal("arc"),
+    center: pointSchema.nullable(),
+    radius: z.number().nullable(),
+    startAngle: z.number().nullable(),
+    endAngle: z.number().nullable(),
+    counterclockwise: z.boolean().nullable(),
+    valid: z.boolean(),
+    pathId: z.string(),
+    segmentIndex: z.number(),
+  }),
+  z.object({ id: z.string(), kind: z.literal("closePath"), pathId: z.string() }),
+  z.object({ id: z.string(), kind: z.literal("fill"), targetId: z.string(), style: sceneStyleSchema }),
+  z.object({ id: z.string(), kind: z.literal("stroke"), targetId: z.string(), style: sceneStyleSchema }),
+]);
 
 const sceneSchema = z.object({
   id: z.string(),
   name: z.string(),
   paths: z.array(scenePathSchema),
+  shapes: z.array(sceneShapeSchema),
+  commands: z.array(sceneCommandSchema),
 });
 
-const interactionEventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("pointer-down"), at: z.number(), x: z.number(), y: z.number(), target: z.string().nullable() }),
-  z.object({ type: z.literal("pointer-move"), at: z.number(), x: z.number(), y: z.number() }),
-  z.object({ type: z.literal("pointer-up"), at: z.number(), x: z.number(), y: z.number() }),
-  z.object({ type: z.literal("tool-mode-changed"), at: z.number(), mode: z.enum(["select", "edit-points"]) }),
-  z.object({ type: z.literal("selection-changed"), at: z.number(), selectedPathId: z.string().nullable() }),
-  z.object({ type: z.literal("drag-start"), at: z.number(), kind: z.enum(["path", "handle"]), targetId: z.string() }),
-  z.object({ type: z.literal("drag-move"), at: z.number(), kind: z.enum(["path", "handle"]), targetId: z.string(), dx: z.number(), dy: z.number() }),
-  z.object({ type: z.literal("drag-end"), at: z.number(), kind: z.enum(["path", "handle"]), targetId: z.string() }),
-  z.object({ type: z.literal("scene-mutated"), at: z.number(), mutation: z.string(), pathId: z.string() }),
-]);
+export const interactionEventSchema = z.object({
+  type: z.literal("click"),
+  at: z.number(),
+  x: z.number(),
+  y: z.number(),
+  target: z.enum(["path", "control-point", "empty"]),
+});
 
 export const toolStateSnapshotSchema = z.object({
-  mode: z.enum(["select", "edit-points"]),
   selectedPathId: z.string().nullable(),
+  selectedPathIds: z.array(z.string()),
   selectedHandleId: z.string().nullable(),
+  selectedCommandId: z.string().nullable(),
   showBounds: z.boolean(),
   showAnchors: z.boolean(),
 });
@@ -117,56 +191,6 @@ export const bugCaseExportSchema = z.object({
   interactionLog: z.array(interactionEventSchema),
 });
 
-export const toDrawOps = (scene: PlaygroundScene): DrawOp[] =>
-  scene.paths.map((path, index) => {
-    let cursor: Point = { ...path.start };
-    const segments: DrawOp["path"]["subpaths"][number]["segments"] = path.segments.map((segment) => {
-      if (segment.kind === "line") {
-        const resolved = { kind: "line" as const, from: { ...cursor }, to: { ...segment.to } };
-        cursor = { ...segment.to };
-        return resolved;
-      }
-      if (segment.kind === "bezier") {
-        const resolved = {
-          kind: "bezier" as const,
-          from: { ...cursor },
-          cp1: { ...segment.cp1 },
-          cp2: { ...segment.cp2 },
-          to: { ...segment.to },
-        };
-        cursor = { ...segment.to };
-        return resolved;
-      }
-      const resolved = {
-        kind: "arc" as const,
-        center: { ...segment.center },
-        radius: segment.radius,
-        startAngle: segment.startAngle,
-        endAngle: segment.endAngle,
-        counterclockwise: segment.counterclockwise,
-      };
-      cursor = { ...segment.to };
-      return resolved;
-    });
-
-    return {
-      opId: `op-${index}`,
-      paint: path.paint,
-      style: { ...path.style },
-      path: {
-        subpaths: [
-          {
-            start: { ...path.start },
-            segments,
-            closed: path.closed,
-          },
-        ],
-      },
-    };
-  });
-
-export const sceneToDocument = (scene: PlaygroundScene): GeometryDocument => ({ version: 1, drawOps: toDrawOps(scene) });
-
 export const cloneScene = (scene: PlaygroundScene): PlaygroundScene => ({
   ...scene,
   paths: scene.paths.map((path) => ({
@@ -174,11 +198,33 @@ export const cloneScene = (scene: PlaygroundScene): PlaygroundScene => ({
     style: { ...path.style },
     start: { ...path.start },
     segments: path.segments.map((segment) => {
-      if (segment.kind === "line") return { ...segment, to: { ...segment.to } };
+      if (segment.kind === "line") {
+        return { ...segment, to: { ...segment.to } };
+      }
       if (segment.kind === "bezier") {
         return { ...segment, cp1: { ...segment.cp1 }, cp2: { ...segment.cp2 }, to: { ...segment.to } };
       }
-      return { ...segment, center: { ...segment.center }, to: { ...segment.to } };
+      return { ...segment, control: { ...segment.control }, to: { ...segment.to } };
     }),
   })),
+  shapes: scene.shapes.map((shape) => ({
+    ...shape,
+    pathIds: [...shape.pathIds],
+    style: { ...shape.style },
+  })),
+  commands: scene.commands.map((command) => {
+    if (command.kind === "bezierCurveTo") {
+      return { ...command, cp1: { ...command.cp1 }, cp2: { ...command.cp2 }, to: { ...command.to } };
+    }
+    if (command.kind === "arc") {
+      return {
+        ...command,
+        center: command.center ? { ...command.center } : null,
+      };
+    }
+    if ("style" in command) {
+      return { ...command, style: { ...command.style } };
+    }
+    return { ...command };
+  }),
 });

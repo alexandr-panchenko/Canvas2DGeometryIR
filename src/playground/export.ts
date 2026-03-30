@@ -1,12 +1,14 @@
 import { serializeDocument } from "../serialization";
 import type { BugCaseExport, InteractionEvent, PlaygroundScene, ToolStateSnapshot } from "./types";
-import { bugCaseExportSchema, cloneScene, sceneToDocument } from "./types";
+import { cloneScene, bugCaseExportSchema } from "./types";
+import { sceneToDocument, syncSceneCommands } from "./scene";
 
 export const createBugCaseExport = (
   scene: PlaygroundScene,
   toolState: ToolStateSnapshot,
   interactionLog: readonly InteractionEvent[],
 ): BugCaseExport => {
+  syncSceneCommands(scene);
   const payload: BugCaseExport = {
     schemaVersion: 1,
     exportedAt: new Date().toISOString(),

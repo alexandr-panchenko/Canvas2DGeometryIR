@@ -1,52 +1,79 @@
 :root {
-  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  color: #111827;
+  color: #172033;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: linear-gradient(180deg, #eef4ff 0%, #f8fafc 100%);
 }
 
 body {
   margin: 0;
-  background: #f3f4f6;
+  background: transparent;
 }
 
 #app {
-  padding: 12px;
+  padding: 14px;
 }
 
 .toolbar {
   display: flex;
-  gap: 10px;
-  align-items: center;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 12px;
+}
+
+.toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .main {
   display: grid;
-  grid-template-columns: 960px minmax(320px, 1fr);
+  grid-template-columns: minmax(0, 960px) minmax(320px, 1fr);
   gap: 12px;
+  align-items: start;
 }
 
 canvas {
-  border: 1px solid #d1d5db;
-  background: white;
+  width: 100%;
+  max-width: 960px;
+  border: 1px solid #bfd1ea;
+  border-radius: 10px;
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.05) 1px, transparent 1px),
+    linear-gradient(rgba(37, 99, 235, 0.05) 1px, transparent 1px),
+    #ffffff;
+  background-size: 24px 24px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
 }
 
 .panel {
-  background: white;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  padding: 8px;
+  display: grid;
+  gap: 10px;
+}
+
+.panel section {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #d8e3f2;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
 }
 
 pre,
 textarea {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 8px;
   width: 100%;
   box-sizing: border-box;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid #d9e3ef;
+  border-radius: 8px;
+  background: #f8fbff;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
   font-size: 12px;
 }
 
@@ -54,4 +81,81 @@ button,
 select,
 input {
   font: inherit;
+}
+
+button,
+select,
+input[type="number"],
+textarea {
+  border: 1px solid #bfd1ea;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+button {
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.list {
+  display: grid;
+  gap: 6px;
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.list-row.selected,
+.command-button.selected {
+  outline: 2px solid #f59e0b;
+  outline-offset: 1px;
+}
+
+.list-button {
+  flex: 1;
+  text-align: left;
+}
+
+.command-list {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.command-button {
+  width: 100%;
+}
+
+#inspector {
+  display: grid;
+  gap: 8px;
+}
+
+.inspector-title {
+  font-weight: 600;
+}
+
+.inspector-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inspector-row input[type="color"] {
+  width: 48px;
+  height: 32px;
+  padding: 0;
+}
+
+@media (max-width: 1360px) {
+  .main {
+    grid-template-columns: 1fr;
+  }
+
+  canvas {
+    max-width: none;
+  }
 }
