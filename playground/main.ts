@@ -45,47 +45,37 @@ app.innerHTML = `
     <label>Scene
       <select id="scene-select"></select>
     </label>
-    <button id="new-path">New Path</button>
-    <button id="add-line">Add Line</button>
-    <button id="add-bezier">Add Bezier</button>
-    <button id="add-arc">Add Arc</button>
-    <button id="create-shape">Create Shape</button>
     <label><input id="toggle-bounds" type="checkbox" checked /> Bounds</label>
     <label><input id="toggle-anchors" type="checkbox" checked /> Geometry anchors</label>
     <button id="export">Export Scene</button>
   </div>
-  <div class="main">
-    <canvas id="canvas" width="960" height="600"></canvas>
-    <div class="panel">
-      <section>
+  <div class="workspace">
+    <aside class="sidebar">
+      <section class="panel-card">
+        <h3>Commands</h3>
+        <div class="sidebar-actions">
+          <button id="new-path">New Path</button>
+          <button id="create-shape">Group Selection</button>
+        </div>
+        <div id="prompt-view" class="prompt-view"></div>
+        <div id="command-tree" class="command-tree"></div>
+      </section>
+      <section class="panel-card">
         <h3>Status</h3>
         <pre id="selection-view"></pre>
       </section>
-      <section>
-        <h3>Inspector</h3>
-        <div id="inspector"></div>
-      </section>
-      <section>
-        <h3>Paths</h3>
-        <div id="path-list" class="list"></div>
-      </section>
-      <section>
-        <h3>Shapes</h3>
-        <div id="shape-list" class="list"></div>
-      </section>
-      <section>
-        <h3>Commands</h3>
-        <div id="command-list" class="list command-list"></div>
-      </section>
-      <section>
+      <section class="panel-card">
         <h3>Export</h3>
-        <textarea id="export-view" rows="14" spellcheck="false"></textarea>
+        <textarea id="export-view" rows="12" spellcheck="false"></textarea>
       </section>
-      <section>
-        <h3>Click log</h3>
+      <section class="panel-card">
+        <h3>Click Log</h3>
         <pre id="log-view"></pre>
       </section>
-    </div>
+    </aside>
+    <section class="scene-panel">
+      <canvas id="canvas" width="960" height="600"></canvas>
+    </section>
   </div>
 `;
 
@@ -93,18 +83,13 @@ const canvas = app.querySelector<HTMLCanvasElement>("#canvas");
 const ctx = canvas?.getContext("2d");
 const sceneSelect = app.querySelector<HTMLSelectElement>("#scene-select");
 const selectionView = app.querySelector<HTMLPreElement>("#selection-view");
-const inspector = app.querySelector<HTMLDivElement>("#inspector");
-const pathList = app.querySelector<HTMLDivElement>("#path-list");
-const shapeList = app.querySelector<HTMLDivElement>("#shape-list");
-const commandList = app.querySelector<HTMLDivElement>("#command-list");
+const commandTree = app.querySelector<HTMLDivElement>("#command-tree");
+const promptView = app.querySelector<HTMLDivElement>("#prompt-view");
 const exportView = app.querySelector<HTMLTextAreaElement>("#export-view");
 const logView = app.querySelector<HTMLPreElement>("#log-view");
 const toggleBounds = app.querySelector<HTMLInputElement>("#toggle-bounds");
 const toggleAnchors = app.querySelector<HTMLInputElement>("#toggle-anchors");
 const newPathButton = app.querySelector<HTMLButtonElement>("#new-path");
-const addLineButton = app.querySelector<HTMLButtonElement>("#add-line");
-const addBezierButton = app.querySelector<HTMLButtonElement>("#add-bezier");
-const addArcButton = app.querySelector<HTMLButtonElement>("#add-arc");
 const createShapeButton = app.querySelector<HTMLButtonElement>("#create-shape");
 const exportButton = app.querySelector<HTMLButtonElement>("#export");
 
@@ -113,18 +98,13 @@ if (
   !ctx ||
   !sceneSelect ||
   !selectionView ||
-  !inspector ||
-  !pathList ||
-  !shapeList ||
-  !commandList ||
+  !commandTree ||
+  !promptView ||
   !exportView ||
   !logView ||
   !toggleBounds ||
   !toggleAnchors ||
   !newPathButton ||
-  !addLineButton ||
-  !addBezierButton ||
-  !addArcButton ||
   !createShapeButton ||
   !exportButton
 ) {
@@ -417,17 +397,24 @@ const setActivePath = (pathId: string | null, alsoToggleMulti = false): void => 
   }
 };
 
+const selectShape = (shape: SceneShape): void => {
+  const firstPathId = shape.pathIds[0] ?? null;
+  setActivePath(firstPathId);
+  selectedPathIds = new Set(shape.pathIds);
+};
+
 const startNewPath = (): void => {
   creationState = { kind: "new-path" };
   selectedHandleId = null;
   selectedCommandId = null;
 };
 
-const startSegmentCreation = (kind: "line" | "arc" | "bezier"): void => {
-  const path = getPathById(selectedPathId);
-  if (!path) {
+const startSegmentCreation = (kind: "line" | "arc" | "bezier", pathId = selectedPathId): void => {
+  const path = getPathById(pathId);
+  if (!path || path.closed) {
     return;
   }
+  setActivePath(path.id);
   selectedHandleId = null;
   selectedCommandId = null;
   if (kind === "line") {
@@ -492,6 +479,78 @@ const createShapeFromSelection = (): void => {
     }
   });
   syncSceneCommands(scene);
+  selectShape(shape);
+};
+
+const deleteShape = (shapeId: string): void => {
+  scene.paths.forEach((path) => {
+    if (path.shapeId === shapeId) {
+      path.shapeId = null;
+    }
+  });
+  scene.shapes = scene.shapes.filter((shape) => shape.id !== shapeId);
+  syncSceneCommands(scene);
+};
+
+const detachPathFromShape = (pathId: string): void => {
+  const path = getPathById(pathId);
+  if (!path || !path.shapeId) {
+    return;
+  }
+  const shapeId = path.shapeId;
+  path.shapeId = null;
+  scene.shapes = scene.shapes
+    .map((shape) => (shape.id === shapeId ? { ...shape, pathIds: shape.pathIds.filter((candidate) => candidate !== pathId) } : shape))
+    .filter((shape) => shape.pathIds.length > 0);
+  syncSceneCommands(scene);
+};
+
+const deletePath = (pathId: string): void => {
+  const path = getPathById(pathId);
+  if (!path) {
+    return;
+  }
+  if (path.shapeId) {
+    const shapeId = path.shapeId;
+    scene.shapes = scene.shapes
+      .map((shape) => (shape.id === shapeId ? { ...shape, pathIds: shape.pathIds.filter((candidate) => candidate !== pathId) } : shape))
+      .filter((shape) => shape.pathIds.length > 0);
+  }
+  scene.paths = scene.paths.filter((candidate) => candidate.id !== pathId);
+  selectedPathIds.delete(pathId);
+  if (selectedPathId === pathId) {
+    selectedPathId = scene.paths[0]?.id ?? null;
+    selectedPathIds = new Set(selectedPathId ? [selectedPathId] : []);
+  }
+  selectedCommandId = null;
+  selectedHandleId = null;
+  if (creationState && creationState.kind !== "new-path" && creationState.pathId === pathId) {
+    creationState = null;
+  }
+  syncSceneCommands(scene);
+};
+
+const removeSegment = (pathId: string, segmentIndex: number): void => {
+  const path = getPathById(pathId);
+  if (!path) {
+    return;
+  }
+  path.segments.splice(segmentIndex, 1);
+  selectedCommandId = null;
+  selectedHandleId = null;
+  syncSceneCommands(scene);
+};
+
+const setPathClosed = (pathId: string, closed: boolean): void => {
+  const path = getPathById(pathId);
+  if (!path) {
+    return;
+  }
+  path.closed = closed;
+  if (closed && creationState && creationState.kind !== "new-path" && creationState.pathId === pathId) {
+    creationState = null;
+  }
+  syncSceneCommands(scene);
 };
 
 const commandLabel = (command: SceneCommand): string => {
@@ -520,23 +579,23 @@ const getCreationPrompt = (): string | null => {
     return null;
   }
   if (creationState.kind === "new-path") {
-    return "Click to place the new path start.";
+    return "Click in the scene to place the new path start.";
   }
   if (creationState.kind === "add-line") {
-    return "Click to place the line end point.";
+    return "Click in the scene to place the line end point.";
   }
   if (creationState.kind === "add-arc") {
     return creationState.end === null
-      ? "Click to place the arc end point."
-      : "Click to place the arc control point.";
+      ? "Click in the scene to place the arc end point."
+      : "Click in the scene to place the arc control point.";
   }
   if (creationState.cp1 === null) {
-    return "Click to place Bezier control point 1.";
+    return "Click in the scene to place Bezier control point 1.";
   }
   if (creationState.cp2 === null) {
-    return "Click to place Bezier control point 2.";
+    return "Click in the scene to place Bezier control point 2.";
   }
-  return "Click to place the Bezier end point.";
+  return "Click in the scene to place the Bezier end point.";
 };
 
 const updateSelectionFromCommand = (command: SceneCommand): void => {
@@ -545,148 +604,343 @@ const updateSelectionFromCommand = (command: SceneCommand): void => {
     setActivePath(command.pathId);
     return;
   }
-  if (command.kind === "beginPath" && command.targetType === "path") {
-    setActivePath(command.targetId);
-  }
-};
-
-const renderInspector = (): void => {
-  const path = getPathById(selectedPathId);
-  const shape = path ? getPathShape(path) : null;
-  const targetStyle = shape?.style ?? path?.style ?? null;
-  const targetPaint = shape?.paint ?? path?.paint ?? null;
-
-  inspector.innerHTML = "";
-  if (!targetStyle || !targetPaint) {
-    inspector.textContent = "Select a path to edit paint and grouping.";
-    return;
-  }
-
-  const title = document.createElement("div");
-  title.className = "inspector-title";
-  title.textContent = shape ? `Editing ${shape.name}` : `Editing ${path?.name ?? "Path"}`;
-
-  const strokeRow = document.createElement("label");
-  strokeRow.className = "inspector-row";
-  strokeRow.textContent = "Stroke";
-  const strokeInput = document.createElement("input");
-  strokeInput.type = "color";
-  strokeInput.value = targetStyle.strokeStyle.startsWith("#") ? targetStyle.strokeStyle : "#2563eb";
-  strokeInput.addEventListener("input", () => {
-    targetStyle.strokeStyle = strokeInput.value;
-    render();
-  });
-  strokeRow.append(strokeInput);
-
-  const fillRow = document.createElement("label");
-  fillRow.className = "inspector-row";
-  fillRow.textContent = "Fill";
-  const fillInput = document.createElement("input");
-  fillInput.type = "color";
-  fillInput.value = targetStyle.fillStyle.startsWith("#") ? targetStyle.fillStyle : "#10b981";
-  fillInput.addEventListener("input", () => {
-    targetStyle.fillStyle = fillInput.value;
-    render();
-  });
-  fillRow.append(fillInput);
-
-  const paintRow = document.createElement("label");
-  paintRow.className = "inspector-row";
-  paintRow.textContent = "Paint";
-  const paintSelect = document.createElement("select");
-  for (const value of ["stroke", "fill", "fill-stroke"] as const) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = value;
-    option.selected = value === targetPaint;
-    paintSelect.append(option);
-  }
-  paintSelect.addEventListener("change", () => {
-    const nextPaint = paintSelect.value as ScenePaintMode;
+  if (command.kind === "beginPath") {
+    if (command.targetType === "path") {
+      setActivePath(command.targetId);
+      return;
+    }
+    const shape = getShapeById(command.targetId);
     if (shape) {
-      shape.paint = nextPaint;
-    } else if (path) {
-      path.paint = nextPaint;
+      selectShape(shape);
     }
-    render();
-  });
-  paintRow.append(paintSelect);
-
-  const widthRow = document.createElement("label");
-  widthRow.className = "inspector-row";
-  widthRow.textContent = "Line width";
-  const widthInput = document.createElement("input");
-  widthInput.type = "number";
-  widthInput.min = "1";
-  widthInput.max = "32";
-  widthInput.step = "1";
-  widthInput.value = String(targetStyle.lineWidth);
-  widthInput.addEventListener("input", () => {
-    targetStyle.lineWidth = Math.max(1, Number(widthInput.value) || 1);
-    render();
-  });
-  widthRow.append(widthInput);
-
-  inspector.append(title, strokeRow, fillRow, paintRow, widthRow);
+  }
 };
 
-const renderLists = (): void => {
-  pathList.innerHTML = "";
-  for (const path of scene.paths) {
-    const row = document.createElement("div");
-    row.className = `list-row${path.id === selectedPathId ? " selected" : ""}`;
+const createControlRow = (labelText: string, input: HTMLElement): HTMLLabelElement => {
+  const row = document.createElement("label");
+  row.className = "control-row";
+  const label = document.createElement("span");
+  label.textContent = labelText;
+  row.append(label, input);
+  return row;
+};
 
-    const toggle = document.createElement("input");
-    toggle.type = "checkbox";
-    toggle.checked = selectedPathIds.has(path.id);
-    toggle.addEventListener("change", () => {
-      setActivePath(path.id, true);
+const createColorInput = (value: string, fallback: string, onInput: (nextValue: string) => void): HTMLInputElement => {
+  const input = document.createElement("input");
+  input.type = "color";
+  input.value = value.startsWith("#") ? value : fallback;
+  input.addEventListener("input", () => {
+    onInput(input.value);
+    render();
+  });
+  return input;
+};
+
+const createNumberInput = (value: number, onInput: (nextValue: number) => void): HTMLInputElement => {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "1";
+  input.max = "32";
+  input.step = "1";
+  input.value = String(value);
+  input.addEventListener("input", () => {
+    onInput(Math.max(1, Number(input.value) || 1));
+    render();
+  });
+  return input;
+};
+
+const createPaintSelect = (value: ScenePaintMode, onChange: (nextValue: ScenePaintMode) => void): HTMLSelectElement => {
+  const select = document.createElement("select");
+  for (const optionValue of ["stroke", "fill", "fill-stroke"] as const) {
+    const option = document.createElement("option");
+    option.value = optionValue;
+    option.textContent = optionValue;
+    option.selected = optionValue === value;
+    select.append(option);
+  }
+  select.addEventListener("change", () => {
+    onChange(select.value as ScenePaintMode);
+    render();
+  });
+  return select;
+};
+
+const buildStyleEditor = (
+  style: SceneStyle,
+  paint: ScenePaintMode,
+  onPaintChange: (nextPaint: ScenePaintMode) => void,
+): HTMLDivElement => {
+  const editor = document.createElement("div");
+  editor.className = "style-editor";
+
+  editor.append(
+    createControlRow("Stroke", createColorInput(style.strokeStyle, "#2563eb", (nextValue) => {
+      style.strokeStyle = nextValue;
+    })),
+    createControlRow("Fill", createColorInput(style.fillStyle, "#10b981", (nextValue) => {
+      style.fillStyle = nextValue;
+    })),
+    createControlRow("Paint", createPaintSelect(paint, onPaintChange)),
+    createControlRow("Line width", createNumberInput(style.lineWidth, (nextValue) => {
+      style.lineWidth = nextValue;
+    })),
+  );
+
+  return editor;
+};
+
+const buildCommandRow = (
+  command: SceneCommand,
+  options: { readonly onDelete?: () => void; readonly extraClassName?: string },
+): HTMLDivElement => {
+  const row = document.createElement("div");
+  row.className = `command-row${command.id === selectedCommandId ? " selected" : ""}${options.extraClassName ? ` ${options.extraClassName}` : ""}`;
+
+  const button = document.createElement("button");
+  button.className = "command-label";
+  button.textContent = commandLabel(command);
+  button.addEventListener("click", () => {
+    updateSelectionFromCommand(command);
+    render();
+  });
+  row.append(button);
+
+  if (options.onDelete) {
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "danger-button";
+    deleteButton.textContent = "Delete";
+    deleteButton.addEventListener("click", () => {
+      options.onDelete?.();
       render();
     });
-
-    const button = document.createElement("button");
-    button.className = "list-button";
-    button.textContent = `${path.name}${path.shapeId ? " [" + path.shapeId + "]" : ""}`;
-    button.addEventListener("click", () => {
-      setActivePath(path.id);
-      render();
-    });
-
-    row.append(toggle, button);
-    pathList.append(row);
+    row.append(deleteButton);
   }
 
-  shapeList.innerHTML = "";
-  if (scene.shapes.length === 0) {
-    shapeList.textContent = "No grouped shapes yet.";
+  return row;
+};
+
+const buildPathCard = (path: ScenePath, level: "root" | "nested"): HTMLDivElement => {
+  const card = document.createElement("div");
+  card.className = `tree-card path-card${path.id === selectedPathId ? " selected" : ""}${level === "nested" ? " nested" : ""}`;
+
+  const header = document.createElement("div");
+  header.className = "tree-header";
+
+  const titleGroup = document.createElement("div");
+  titleGroup.className = "tree-title-group";
+
+  const multiSelect = document.createElement("input");
+  multiSelect.type = "checkbox";
+  multiSelect.checked = selectedPathIds.has(path.id);
+  multiSelect.addEventListener("change", () => {
+    setActivePath(path.id, true);
+    render();
+  });
+
+  const titleButton = document.createElement("button");
+  titleButton.className = "tree-title";
+  titleButton.textContent = path.name;
+  titleButton.addEventListener("click", () => {
+    setActivePath(path.id);
+    render();
+  });
+
+  const meta = document.createElement("span");
+  meta.className = "tree-meta";
+  meta.textContent = path.closed ? "closed" : `${path.segments.length} segment${path.segments.length === 1 ? "" : "s"}`;
+
+  titleGroup.append(multiSelect, titleButton, meta);
+
+  const actions = document.createElement("div");
+  actions.className = "tree-actions";
+
+  const addLineButton = document.createElement("button");
+  addLineButton.textContent = "Line";
+  addLineButton.disabled = path.closed;
+  addLineButton.addEventListener("click", () => {
+    startSegmentCreation("line", path.id);
+    render();
+  });
+
+  const addBezierButton = document.createElement("button");
+  addBezierButton.textContent = "Bezier";
+  addBezierButton.disabled = path.closed;
+  addBezierButton.addEventListener("click", () => {
+    startSegmentCreation("bezier", path.id);
+    render();
+  });
+
+  const addArcButton = document.createElement("button");
+  addArcButton.textContent = "Arc";
+  addArcButton.disabled = path.closed;
+  addArcButton.addEventListener("click", () => {
+    startSegmentCreation("arc", path.id);
+    render();
+  });
+
+  const closeButton = document.createElement("button");
+  closeButton.textContent = path.closed ? "Open" : "Close";
+  closeButton.addEventListener("click", () => {
+    setPathClosed(path.id, !path.closed);
+    render();
+  });
+
+  if (path.shapeId) {
+    const detachButton = document.createElement("button");
+    detachButton.textContent = "Detach";
+    detachButton.addEventListener("click", () => {
+      detachPathFromShape(path.id);
+      render();
+    });
+    actions.append(detachButton);
+  }
+
+  const deleteButton = document.createElement("button");
+  deleteButton.className = "danger-button";
+  deleteButton.textContent = "Delete";
+  deleteButton.addEventListener("click", () => {
+    deletePath(path.id);
+    render();
+  });
+
+  actions.append(addLineButton, addBezierButton, addArcButton, closeButton, deleteButton);
+  header.append(titleGroup, actions);
+  card.append(header);
+
+  if (!path.shapeId) {
+    card.append(
+      buildStyleEditor(path.style, path.paint, (nextPaint) => {
+        path.paint = nextPaint;
+      }),
+    );
   } else {
-    for (const shape of scene.shapes) {
-      const row = document.createElement("div");
-      row.className = "list-row";
-      const button = document.createElement("button");
-      button.className = "list-button";
-      button.textContent = `${shape.name}: ${shape.pathIds.join(", ")}`;
-      button.addEventListener("click", () => {
-        const firstPathId = shape.pathIds[0] ?? null;
-        setActivePath(firstPathId);
-        selectedPathIds = new Set(shape.pathIds);
-        render();
-      });
-      row.append(button);
-      shapeList.append(row);
+    const inherited = document.createElement("div");
+    inherited.className = "inherited-note";
+    const shape = getShapeById(path.shapeId);
+    inherited.textContent = `Uses ${shape?.name ?? "shape"} paint controls.`;
+    card.append(inherited);
+  }
+
+  const commands = document.createElement("div");
+  commands.className = "command-stack";
+  const moveToCommand = scene.commands.find((command) => command.kind === "moveTo" && command.pathId === path.id);
+  if (moveToCommand) {
+    commands.append(buildCommandRow(moveToCommand, {}));
+  }
+  path.segments.forEach((_, segmentIndex) => {
+    const command = getCommandForSegment(path.id, segmentIndex);
+    if (command) {
+      commands.append(buildCommandRow(command, { onDelete: () => removeSegment(path.id, segmentIndex) }));
+    }
+  });
+  if (path.closed) {
+    const closeCommand = scene.commands.find((command) => command.kind === "closePath" && command.pathId === path.id);
+    if (closeCommand) {
+      commands.append(buildCommandRow(closeCommand, { onDelete: () => setPathClosed(path.id, false), extraClassName: "close-command" }));
+    }
+  }
+  card.append(commands);
+
+  return card;
+};
+
+const renderCommandTree = (): void => {
+  commandTree.innerHTML = "";
+
+  for (const shape of scene.shapes) {
+    const shapeCard = document.createElement("div");
+    shapeCard.className = `tree-card shape-card${shape.pathIds.includes(selectedPathId ?? "") ? " selected" : ""}`;
+
+    const header = document.createElement("div");
+    header.className = "tree-header";
+
+    const titleGroup = document.createElement("div");
+    titleGroup.className = "tree-title-group";
+
+    const titleButton = document.createElement("button");
+    titleButton.className = "tree-title";
+    titleButton.textContent = shape.name;
+    titleButton.addEventListener("click", () => {
+      selectShape(shape);
+      render();
+    });
+
+    const meta = document.createElement("span");
+    meta.className = "tree-meta";
+    meta.textContent = `${shape.pathIds.length} path${shape.pathIds.length === 1 ? "" : "s"}`;
+
+    titleGroup.append(titleButton, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "tree-actions";
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "danger-button";
+    deleteButton.textContent = "Delete Shape";
+    deleteButton.addEventListener("click", () => {
+      deleteShape(shape.id);
+      render();
+    });
+    actions.append(deleteButton);
+
+    header.append(titleGroup, actions);
+    shapeCard.append(header);
+
+    shapeCard.append(
+      buildStyleEditor(shape.style, shape.paint, (nextPaint) => {
+        shape.paint = nextPaint;
+      }),
+    );
+
+    const beginCommand = scene.commands.find(
+      (command) => command.kind === "beginPath" && command.targetType === "shape" && command.targetId === shape.id,
+    );
+    if (beginCommand) {
+      shapeCard.append(buildCommandRow(beginCommand, {}));
+    }
+
+    const nestedPaths = document.createElement("div");
+    nestedPaths.className = "nested-paths";
+    for (const pathId of shape.pathIds) {
+      const path = getPathById(pathId);
+      if (path) {
+        nestedPaths.append(buildPathCard(path, "nested"));
+      }
+    }
+    shapeCard.append(nestedPaths);
+
+    const paintCommands = scene.commands.filter(
+      (command) => ("targetId" in command) && command.targetId === shape.id && (command.kind === "fill" || command.kind === "stroke"),
+    );
+    for (const command of paintCommands) {
+      shapeCard.append(buildCommandRow(command, {}));
+    }
+
+    commandTree.append(shapeCard);
+  }
+
+  const ungroupedPaths = scene.paths.filter((path) => path.shapeId === null);
+  if (ungroupedPaths.length > 0) {
+    for (const path of ungroupedPaths) {
+      const pathCard = buildPathCard(path, "root");
+      const beginCommand = scene.commands.find(
+        (command) => command.kind === "beginPath" && command.targetType === "path" && command.targetId === path.id,
+      );
+      if (beginCommand) {
+        pathCard.insertBefore(buildCommandRow(beginCommand, {}), pathCard.children[1] ?? null);
+      }
+      const paintCommands = scene.commands.filter(
+        (command) => ("targetId" in command) && command.targetId === path.id && (command.kind === "fill" || command.kind === "stroke"),
+      );
+      for (const command of paintCommands) {
+        pathCard.append(buildCommandRow(command, {}));
+      }
+      commandTree.append(pathCard);
     }
   }
 
-  commandList.innerHTML = "";
-  for (const command of scene.commands) {
-    const button = document.createElement("button");
-    button.className = `list-button command-button${command.id === selectedCommandId ? " selected" : ""}`;
-    button.textContent = commandLabel(command);
-    button.addEventListener("click", () => {
-      updateSelectionFromCommand(command);
-      render();
-    });
-    commandList.append(button);
+  if (scene.shapes.length === 0 && ungroupedPaths.length === 0) {
+    commandTree.textContent = "No paths yet. Start a new path and click in the scene to place it.";
   }
 };
 
@@ -850,6 +1104,7 @@ const render = (): void => {
     drawHandle(hoverPoint, "anchor", true);
   }
 
+  promptView.textContent = getCreationPrompt() ?? "Select a path or shape from the command tree, or use the canvas directly.";
   selectionView.textContent = JSON.stringify(
     {
       selectedPathId,
@@ -866,8 +1121,7 @@ const render = (): void => {
     2,
   );
   logView.textContent = JSON.stringify(interactionLog, null, 2);
-  renderInspector();
-  renderLists();
+  renderCommandTree();
 };
 
 sceneSelect.value = scene.id;
@@ -892,18 +1146,6 @@ toggleBounds.addEventListener("change", render);
 toggleAnchors.addEventListener("change", render);
 newPathButton.addEventListener("click", () => {
   startNewPath();
-  render();
-});
-addLineButton.addEventListener("click", () => {
-  startSegmentCreation("line");
-  render();
-});
-addBezierButton.addEventListener("click", () => {
-  startSegmentCreation("bezier");
-  render();
-});
-addArcButton.addEventListener("click", () => {
-  startSegmentCreation("arc");
   render();
 });
 createShapeButton.addEventListener("click", () => {
