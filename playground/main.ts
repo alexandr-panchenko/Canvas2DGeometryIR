@@ -3,6 +3,7 @@ import { createBugCaseExport, serializeBugCaseExportWithDocumentString } from ".
 import { builtInScenes, getBuiltInScene } from "../src/playground/fixtures";
 import { resolveArcThroughPoint, sceneToDocument, syncSceneCommands } from "../src/playground/scene";
 import { cloneScene } from "../src/playground/types";
+import { closestPointOnSegment } from "../src/segments";
 import type {
   InteractionEvent,
   PlaygroundScene,
@@ -14,7 +15,7 @@ import type {
   SceneStyle,
   ToolStateSnapshot,
 } from "../src/playground/types";
-import type { Point, Rect } from "../src/types";
+import type { Point, Rect, Segment } from "../src/types";
 
 interface HandleRef {
   readonly id: string;
@@ -34,6 +35,13 @@ type DragState =
   | { readonly kind: "path"; readonly pathId: string; lastPoint: Point; moved: boolean }
   | { readonly kind: "handle"; readonly handle: HandleRef; lastPoint: Point; moved: boolean }
   | null;
+
+interface ClosestPathHover {
+  readonly pathId: string;
+  readonly point: Point;
+  readonly distance: number;
+  readonly segmentIndex: number;
+}
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
@@ -176,6 +184,8 @@ const getShapeById = (shapeId: string | null): SceneShape | null => {
 
 const getPathCurrentPoint = (path: ScenePath): Point => path.segments[path.segments.length - 1]?.to ?? path.start;
 
+const pointDistance = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y);
+
 const getCommandForSegment = (pathId: string, segmentIndex: number): SceneCommand | null =>
   scene.commands.find(
     (command) =>
@@ -315,6 +325,30 @@ const drawHandle = (point: Point, kind: "anchor" | "control", active: boolean): 
   ctx.restore();
 };
 
+const drawClosestPointHighlight = (hover: ClosestPathHover): void => {
+  const path = getPathById(hover.pathId);
+  if (!path) {
+    return;
+  }
+
+  ctx.save();
+  ctx.strokeStyle = "#0ea5e9";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 4]);
+  ctx.stroke(buildCanvasPath(path));
+  ctx.restore();
+
+  ctx.save();
+  ctx.fillStyle = "#0ea5e9";
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(hover.point.x, hover.point.y, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+};
+
 const buildCanvasPath = (path: ScenePath): Path2D => {
   const shape = new Path2D();
   shape.moveTo(path.start.x, path.start.y);
@@ -372,6 +406,60 @@ const pickPath = (point: Point): string | null => {
     }
   }
   return null;
+};
+
+const getGeometrySegmentsForSceneSegment = (from: Point, segment: SceneSegment): Segment[] => {
+  if (segment.kind === "line") {
+    return [{ kind: "line", from, to: segment.to }];
+  }
+  if (segment.kind === "bezier") {
+    return [{ kind: "bezier", from, cp1: segment.cp1, cp2: segment.cp2, to: segment.to }];
+  }
+  const resolved = resolveArcThroughPoint(from, segment.control, segment.to);
+  if (resolved) {
+    return [{
+      kind: "arc",
+      center: resolved.center,
+      radius: resolved.radius,
+      startAngle: resolved.startAngle,
+      endAngle: resolved.endAngle,
+      counterclockwise: resolved.counterclockwise,
+    }];
+  }
+  return [{ kind: "line", from, to: segment.to }];
+};
+
+const findClosestPointOnPath = (path: ScenePath, target: Point): ClosestPathHover | null => {
+  let current = path.start;
+  let best: ClosestPathHover | null = null;
+
+  path.segments.forEach((segment, segmentIndex) => {
+    for (const geometrySegment of getGeometrySegmentsForSceneSegment(current, segment)) {
+      const point = closestPointOnSegment(geometrySegment, target);
+      const distance = pointDistance(point, target);
+      if (best === null || distance < best.distance) {
+        best = { pathId: path.id, point, distance, segmentIndex };
+      }
+    }
+    current = segment.to;
+  });
+
+  return best;
+};
+
+const findClosestPathHover = (target: Point | null): ClosestPathHover | null => {
+  if (!target) {
+    return null;
+  }
+
+  let best: ClosestPathHover | null = null;
+  for (const path of scene.paths) {
+    const candidate = findClosestPointOnPath(path, target);
+    if (candidate && (best === null || candidate.distance < best.distance)) {
+      best = candidate;
+    }
+  }
+  return best;
 };
 
 const setActivePath = (pathId: string | null, alsoToggleMulti = false): void => {
@@ -720,6 +808,37 @@ const buildCommandRow = (
   return row;
 };
 
+const buildInsertRow = (path: ScenePath): HTMLDivElement => {
+  const row = document.createElement("div");
+  row.className = "command-row insert-row";
+
+  const label = document.createElement("span");
+  label.className = "insert-label";
+  label.textContent = "Insert next";
+  row.append(label);
+
+  const buildInsertButton = (text: string, onClick: () => void): HTMLButtonElement => {
+    const button = document.createElement("button");
+    button.className = "insert-button";
+    button.textContent = text;
+    button.disabled = path.closed;
+    button.addEventListener("click", () => {
+      onClick();
+      render();
+    });
+    return button;
+  };
+
+  row.append(
+    buildInsertButton("Line", () => startSegmentCreation("line", path.id)),
+    buildInsertButton("Curve", () => startSegmentCreation("bezier", path.id)),
+    buildInsertButton("Arc", () => startSegmentCreation("arc", path.id)),
+    buildInsertButton("Close", () => setPathClosed(path.id, true)),
+  );
+
+  return row;
+};
+
 const buildPathCard = (path: ScenePath, level: "root" | "nested"): HTMLDivElement => {
   const card = document.createElement("div");
   card.className = `tree-card path-card${path.id === selectedPathId ? " selected" : ""}${level === "nested" ? " nested" : ""}`;
@@ -755,37 +874,6 @@ const buildPathCard = (path: ScenePath, level: "root" | "nested"): HTMLDivElemen
   const actions = document.createElement("div");
   actions.className = "tree-actions";
 
-  const addLineButton = document.createElement("button");
-  addLineButton.textContent = "Line";
-  addLineButton.disabled = path.closed;
-  addLineButton.addEventListener("click", () => {
-    startSegmentCreation("line", path.id);
-    render();
-  });
-
-  const addBezierButton = document.createElement("button");
-  addBezierButton.textContent = "Bezier";
-  addBezierButton.disabled = path.closed;
-  addBezierButton.addEventListener("click", () => {
-    startSegmentCreation("bezier", path.id);
-    render();
-  });
-
-  const addArcButton = document.createElement("button");
-  addArcButton.textContent = "Arc";
-  addArcButton.disabled = path.closed;
-  addArcButton.addEventListener("click", () => {
-    startSegmentCreation("arc", path.id);
-    render();
-  });
-
-  const closeButton = document.createElement("button");
-  closeButton.textContent = path.closed ? "Open" : "Close";
-  closeButton.addEventListener("click", () => {
-    setPathClosed(path.id, !path.closed);
-    render();
-  });
-
   if (path.shapeId) {
     const detachButton = document.createElement("button");
     detachButton.textContent = "Detach";
@@ -804,7 +892,17 @@ const buildPathCard = (path: ScenePath, level: "root" | "nested"): HTMLDivElemen
     render();
   });
 
-  actions.append(addLineButton, addBezierButton, addArcButton, closeButton, deleteButton);
+  if (path.closed) {
+    const reopenButton = document.createElement("button");
+    reopenButton.textContent = "Open";
+    reopenButton.addEventListener("click", () => {
+      setPathClosed(path.id, false);
+      render();
+    });
+    actions.append(reopenButton);
+  }
+
+  actions.append(deleteButton);
   header.append(titleGroup, actions);
   card.append(header);
 
@@ -834,7 +932,9 @@ const buildPathCard = (path: ScenePath, level: "root" | "nested"): HTMLDivElemen
       commands.append(buildCommandRow(command, { onDelete: () => removeSegment(path.id, segmentIndex) }));
     }
   });
-  if (path.closed) {
+  if (!path.closed) {
+    commands.append(buildInsertRow(path));
+  } else {
     const closeCommand = scene.commands.find((command) => command.kind === "closePath" && command.pathId === path.id);
     if (closeCommand) {
       commands.append(buildCommandRow(closeCommand, { onDelete: () => setPathClosed(path.id, false), extraClassName: "close-command" }));
@@ -1036,6 +1136,7 @@ const buildPreviewPath = (): Path2D | null => {
 const render = (): void => {
   syncSceneCommands(scene);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const hoverClosestPath = findClosestPathHover(hoverPoint);
 
   const renderedShapes = new Set<string>();
   for (const path of scene.paths) {
@@ -1069,6 +1170,10 @@ const render = (): void => {
       const point = getHandlePoint(selectedPath, handle);
       drawHandle(point, handle.role === "cp1" || handle.role === "cp2" || handle.role === "control" ? "control" : "anchor", handle.id === selectedHandleId);
     }
+  }
+
+  if (hoverClosestPath) {
+    drawClosestPointHighlight(hoverClosestPath);
   }
 
   const document = sceneToDocument(scene);
@@ -1113,6 +1218,15 @@ const render = (): void => {
       selectedCommandId,
       creation: creationState?.kind ?? null,
       prompt: getCreationPrompt(),
+      hoverPoint,
+      hoverClosestPath: hoverClosestPath
+        ? {
+            pathId: hoverClosestPath.pathId,
+            segmentIndex: hoverClosestPath.segmentIndex,
+            point: hoverClosestPath.point,
+            distance: Number(hoverClosestPath.distance.toFixed(2)),
+          }
+        : null,
       pathCount: scene.paths.length,
       shapeCount: scene.shapes.length,
       commandCount: scene.commands.length,

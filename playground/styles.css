@@ -235,6 +235,26 @@ canvas {
   gap: 8px;
 }
 
+.insert-row {
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px dashed #bfd1ea;
+  border-radius: 12px;
+  background: #f6faff;
+}
+
+.insert-label {
+  min-width: 68px;
+  color: #52637b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.insert-button {
+  padding: 5px 9px;
+  background: #ffffff;
+}
+
 .command-row.selected {
   outline: 2px solid #f59e0b;
   outline-offset: 1px;
