@@ -1,7 +1,7 @@
 import { GeometryEngine } from "../src/geometry";
 import { createBugCaseExport, serializeBugCaseExportWithDocumentString } from "../src/playground/export";
 import { builtInScenes, getBuiltInScene } from "../src/playground/fixtures";
-import { resolveArcThroughPoint, sceneToDocument, syncSceneCommands } from "../src/playground/scene";
+import { resolveArcThroughPoint, resolveCurveThroughPointsSegments, sceneToDocument, syncSceneCommands } from "../src/playground/scene";
 import { cloneScene } from "../src/playground/types";
 import { closestPointOnSegment } from "../src/segments";
 import type {
@@ -21,7 +21,8 @@ interface HandleRef {
   readonly id: string;
   readonly pathId: string;
   readonly segmentIndex: number;
-  readonly role: "start" | "to" | "cp1" | "cp2" | "control";
+  readonly role: "start" | "to" | "cp1" | "cp2" | "control" | "curve-point";
+  readonly pointIndex?: number;
 }
 
 type CreationState =
@@ -29,6 +30,11 @@ type CreationState =
   | { readonly kind: "add-line"; readonly pathId: string }
   | { readonly kind: "add-arc"; readonly pathId: string; readonly end: Point | null }
   | { readonly kind: "add-bezier"; readonly pathId: string; readonly cp1: Point | null; readonly cp2: Point | null }
+  | {
+      readonly kind: "add-curve-through-points";
+      readonly pathId: string;
+      readonly segmentIndex: number | null;
+    }
   | null;
 
 type DragState =
@@ -182,7 +188,14 @@ const getShapeById = (shapeId: string | null): SceneShape | null => {
   return scene.shapes.find((shape) => shape.id === shapeId) ?? null;
 };
 
-const getPathCurrentPoint = (path: ScenePath): Point => path.segments[path.segments.length - 1]?.to ?? path.start;
+const getSegmentEndPoint = (segment: SceneSegment): Point => {
+  if (segment.kind === "curveThroughPoints") {
+    return segment.to;
+  }
+  return segment.to;
+};
+
+const getPathCurrentPoint = (path: ScenePath): Point => path.segments[path.segments.length - 1] ? getSegmentEndPoint(path.segments[path.segments.length - 1]!) : path.start;
 
 const pointDistance = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y);
 
@@ -196,10 +209,17 @@ const getCommandForSegment = (pathId: string, segmentIndex: number): SceneComman
 const collectHandles = (path: ScenePath): HandleRef[] => {
   const handles: HandleRef[] = [{ id: `${path.id}:start`, pathId: path.id, segmentIndex: -1, role: "start" }];
   path.segments.forEach((segment, index) => {
-    handles.push({ id: `${path.id}:${index}:to`, pathId: path.id, segmentIndex: index, role: "to" });
+    if (segment.kind !== "curveThroughPoints") {
+      handles.push({ id: `${path.id}:${index}:to`, pathId: path.id, segmentIndex: index, role: "to" });
+    }
     if (segment.kind === "bezier") {
       handles.push({ id: `${path.id}:${index}:cp1`, pathId: path.id, segmentIndex: index, role: "cp1" });
       handles.push({ id: `${path.id}:${index}:cp2`, pathId: path.id, segmentIndex: index, role: "cp2" });
+    }
+    if (segment.kind === "curveThroughPoints") {
+      segment.points.forEach((_, pointIndex) => {
+        handles.push({ id: `${path.id}:${index}:point:${pointIndex}`, pathId: path.id, segmentIndex: index, role: "curve-point", pointIndex });
+      });
     }
     if (segment.kind === "arc") {
       handles.push({ id: `${path.id}:${index}:control`, pathId: path.id, segmentIndex: index, role: "control" });
@@ -225,6 +245,9 @@ const getHandlePoint = (path: ScenePath, handle: HandleRef): Point => {
   if (segment.kind === "bezier" && handle.role === "cp2") {
     return segment.cp2;
   }
+  if (segment.kind === "curveThroughPoints" && handle.role === "curve-point") {
+    return segment.points[handle.pointIndex ?? 0] ?? segment.to;
+  }
   if (segment.kind === "arc" && handle.role === "control") {
     return segment.control;
   }
@@ -242,6 +265,9 @@ const setHandlePoint = (path: ScenePath, handle: HandleRef, point: Point): void 
   }
   if (handle.role === "to") {
     segment.to = point;
+    if (segment.kind === "curveThroughPoints" && segment.points.length > 0) {
+      segment.points[segment.points.length - 1] = point;
+    }
     return;
   }
   if (segment.kind === "bezier" && handle.role === "cp1") {
@@ -250,6 +276,16 @@ const setHandlePoint = (path: ScenePath, handle: HandleRef, point: Point): void 
   }
   if (segment.kind === "bezier" && handle.role === "cp2") {
     segment.cp2 = point;
+    return;
+  }
+  if (segment.kind === "curveThroughPoints" && handle.role === "curve-point") {
+    const pointIndex = handle.pointIndex ?? 0;
+    if (segment.points[pointIndex]) {
+      segment.points[pointIndex] = point;
+    }
+    if (pointIndex === segment.points.length - 1) {
+      segment.to = point;
+    }
     return;
   }
   if (segment.kind === "arc" && handle.role === "control") {
@@ -282,6 +318,13 @@ const translatePath = (path: ScenePath, dx: number, dy: number): void => {
         ...segment,
         cp1: { x: segment.cp1.x + dx, y: segment.cp1.y + dy },
         cp2: { x: segment.cp2.x + dx, y: segment.cp2.y + dy },
+        to: { x: segment.to.x + dx, y: segment.to.y + dy },
+      };
+    }
+    if (segment.kind === "curveThroughPoints") {
+      return {
+        ...segment,
+        points: segment.points.map((point) => ({ x: point.x + dx, y: point.y + dy })),
         to: { x: segment.to.x + dx, y: segment.to.y + dy },
       };
     }
@@ -364,6 +407,24 @@ const buildCanvasPath = (path: ScenePath): Path2D => {
       current = segment.to;
       continue;
     }
+    if (segment.kind === "curveThroughPoints") {
+      for (const geometrySegment of resolveCurveThroughPointsSegments(current, segment.points)) {
+        if (geometrySegment.kind === "line") {
+          shape.lineTo(geometrySegment.to.x, geometrySegment.to.y);
+        } else {
+          shape.bezierCurveTo(
+            geometrySegment.cp1.x,
+            geometrySegment.cp1.y,
+            geometrySegment.cp2.x,
+            geometrySegment.cp2.y,
+            geometrySegment.to.x,
+            geometrySegment.to.y,
+          );
+        }
+      }
+      current = segment.to;
+      continue;
+    }
     const resolved = resolveArcThroughPoint(current, segment.control, segment.to);
     if (resolved) {
       shape.arc(resolved.center.x, resolved.center.y, resolved.radius, resolved.startAngle, resolved.endAngle, resolved.counterclockwise);
@@ -414,6 +475,9 @@ const getGeometrySegmentsForSceneSegment = (from: Point, segment: SceneSegment):
   }
   if (segment.kind === "bezier") {
     return [{ kind: "bezier", from, cp1: segment.cp1, cp2: segment.cp2, to: segment.to }];
+  }
+  if (segment.kind === "curveThroughPoints") {
+    return resolveCurveThroughPointsSegments(from, segment.points);
   }
   const resolved = resolveArcThroughPoint(from, segment.control, segment.to);
   if (resolved) {
@@ -497,7 +561,7 @@ const startNewPath = (): void => {
   selectedCommandId = null;
 };
 
-const startSegmentCreation = (kind: "line" | "arc" | "bezier", pathId = selectedPathId): void => {
+const startSegmentCreation = (kind: "line" | "arc" | "bezier" | "curveThroughPoints", pathId = selectedPathId): void => {
   const path = getPathById(pathId);
   if (!path || path.closed) {
     return;
@@ -511,6 +575,10 @@ const startSegmentCreation = (kind: "line" | "arc" | "bezier", pathId = selected
   }
   if (kind === "arc") {
     creationState = { kind: "add-arc", pathId: path.id, end: null };
+    return;
+  }
+  if (kind === "curveThroughPoints") {
+    creationState = { kind: "add-curve-through-points", pathId: path.id, segmentIndex: null };
     return;
   }
   creationState = { kind: "add-bezier", pathId: path.id, cp1: null, cp2: null };
@@ -651,6 +719,8 @@ const commandLabel = (command: SceneCommand): string => {
       return `lineTo(${command.x.toFixed(1)}, ${command.y.toFixed(1)})`;
     case "bezierCurveTo":
       return `bezierCurveTo(${command.cp1.x.toFixed(1)}, ${command.cp1.y.toFixed(1)} ... ${command.to.x.toFixed(1)}, ${command.to.y.toFixed(1)})`;
+    case "curveThroughPoints":
+      return `curveThroughPoints(${command.points.length} point${command.points.length === 1 ? "" : "s"})`;
     case "arc":
       return command.valid ? `arc(r=${command.radius?.toFixed(1) ?? "?"})` : "arc(degenerate)";
     case "closePath":
@@ -676,6 +746,11 @@ const getCreationPrompt = (): string | null => {
     return creationState.end === null
       ? "Click in the scene to place the arc end point."
       : "Click in the scene to place the arc control point.";
+  }
+  if (creationState.kind === "add-curve-through-points") {
+    return creationState.segmentIndex === null
+      ? "Click in the scene to place the first curve point."
+      : "Click in the scene to add the next curve point.";
   }
   if (creationState.cp1 === null) {
     return "Click in the scene to place Bezier control point 1.";
@@ -832,6 +907,7 @@ const buildInsertRow = (path: ScenePath): HTMLDivElement => {
   row.append(
     buildInsertButton("Line", () => startSegmentCreation("line", path.id)),
     buildInsertButton("Curve", () => startSegmentCreation("bezier", path.id)),
+    buildInsertButton("Curve pts", () => startSegmentCreation("curveThroughPoints", path.id)),
     buildInsertButton("Arc", () => startSegmentCreation("arc", path.id)),
     buildInsertButton("Close", () => setPathClosed(path.id, true)),
   );
@@ -1060,6 +1136,19 @@ const drawSegmentGuides = (path: ScenePath): void => {
       ctx.stroke();
       ctx.restore();
     }
+    if (segment.kind === "curveThroughPoints") {
+      ctx.save();
+      ctx.strokeStyle = "#64748b";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(previous.x, previous.y);
+      for (const point of segment.points) {
+        ctx.lineTo(point.x, point.y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
     if (segment.kind === "arc") {
       ctx.save();
       ctx.strokeStyle = "#f9a8d4";
@@ -1092,6 +1181,39 @@ const buildPreviewPath = (): Path2D | null => {
   const from = getPathCurrentPoint(path);
   if (creationState.kind === "add-line") {
     previewPath.lineTo(hoverPoint.x, hoverPoint.y);
+    return previewPath;
+  }
+  if (creationState.kind === "add-curve-through-points") {
+    let activeSegment: Extract<SceneSegment, { kind: "curveThroughPoints" }> | null = null;
+    let activeStart = path.start;
+    let current = path.start;
+    for (const segment of path.segments) {
+      if (segment.kind === "curveThroughPoints") {
+        activeSegment = segment;
+        activeStart = current;
+      }
+      current = segment.to;
+    }
+    const basePoints = activeSegment?.points ?? [];
+    if (basePoints.length === 0) {
+      previewPath.lineTo(hoverPoint.x, hoverPoint.y);
+      return previewPath;
+    }
+    const previewPoints = [...basePoints, hoverPoint];
+    for (const geometrySegment of resolveCurveThroughPointsSegments(activeStart, previewPoints)) {
+      if (geometrySegment.kind === "line") {
+        previewPath.lineTo(geometrySegment.to.x, geometrySegment.to.y);
+      } else {
+        previewPath.bezierCurveTo(
+          geometrySegment.cp1.x,
+          geometrySegment.cp1.y,
+          geometrySegment.cp2.x,
+          geometrySegment.cp2.y,
+          geometrySegment.to.x,
+          geometrySegment.to.y,
+        );
+      }
+    }
     return previewPath;
   }
   if (creationState.kind === "add-arc") {
@@ -1339,6 +1461,23 @@ canvas.addEventListener("pointerdown", (event) => {
         commitSegment(path, { kind: "arc", control: point, to: creationState.end });
         selectedCommandId = getCommandForSegment(path.id, path.segments.length - 1)?.id ?? null;
       }
+      render();
+      return;
+    }
+    if (creationState.kind === "add-curve-through-points") {
+      const segmentIndex = creationState.segmentIndex;
+      if (segmentIndex === null) {
+        path.segments.push({ kind: "curveThroughPoints", points: [point], to: point });
+        creationState = { ...creationState, segmentIndex: path.segments.length - 1 };
+      } else {
+        const segment = path.segments[segmentIndex];
+        if (segment?.kind === "curveThroughPoints") {
+          segment.points.push(point);
+          segment.to = point;
+        }
+      }
+      selectedCommandId = getCommandForSegment(path.id, creationState.segmentIndex ?? path.segments.length - 1)?.id ?? null;
+      syncSceneCommands(scene);
       render();
       return;
     }

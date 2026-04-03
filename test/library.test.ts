@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Canvas2DGeometryIRContext, GeometryEngine, deserializeDocument, replayDocument, serializeDocument } from "../src";
+import { sceneToDocument, syncSceneCommands } from "../src/playground/scene";
 import type { CanvasLikeReplayTarget } from "../src";
+import type { PlaygroundScene } from "../src/playground/types";
 
 class FakeReplayTarget implements CanvasLikeReplayTarget {
   readonly log: string[] = [];
@@ -102,5 +104,44 @@ describe("Canvas2DGeometryIR", () => {
     expect(replayTarget.log).toContain("stroke");
     expect(replayTarget.log.some((entry) => entry.startsWith("bezier:"))).toBeTrue();
     expect(replayTarget.log.some((entry) => entry.startsWith("arc:"))).toBeTrue();
+  });
+
+  test("curve through points lowers to standard bezier geometry", () => {
+    const scene: PlaygroundScene = {
+      id: "curve-demo",
+      name: "Curve demo",
+      paths: [
+        {
+          id: "curve-path",
+          name: "Curve path",
+          style: { fillStyle: "#000000", strokeStyle: "#000", lineWidth: 2 },
+          paint: "stroke",
+          start: { x: 40, y: 140 },
+          segments: [
+            {
+              kind: "curveThroughPoints",
+              points: [
+                { x: 110, y: 50 },
+                { x: 190, y: 190 },
+                { x: 280, y: 90 },
+              ],
+              to: { x: 280, y: 90 },
+            },
+          ],
+          closed: false,
+          shapeId: null,
+        },
+      ],
+      shapes: [],
+      commands: [],
+    };
+
+    syncSceneCommands(scene);
+    expect(scene.commands.some((command) => command.kind === "curveThroughPoints")).toBeTrue();
+
+    const document = sceneToDocument(scene);
+    const engine = new GeometryEngine(document);
+    const inspect = engine.inspectPath("op-0");
+    expect(inspect?.segmentKinds.includes("bezier")).toBeTrue();
   });
 });

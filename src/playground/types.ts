@@ -13,7 +13,8 @@ export interface SceneStyle {
 export type SceneSegment =
   | { readonly kind: "line"; to: Point }
   | { readonly kind: "bezier"; cp1: Point; cp2: Point; to: Point }
-  | { readonly kind: "arc"; control: Point; to: Point };
+  | { readonly kind: "arc"; control: Point; to: Point }
+  | { readonly kind: "curveThroughPoints"; points: Point[]; to: Point };
 
 export interface ScenePath {
   id: string;
@@ -44,6 +45,13 @@ export type SceneCommand =
       readonly cp1: Point;
       readonly cp2: Point;
       readonly to: Point;
+      readonly pathId: string;
+      readonly segmentIndex: number;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "curveThroughPoints";
+      readonly points: readonly Point[];
       readonly pathId: string;
       readonly segmentIndex: number;
     }
@@ -107,6 +115,11 @@ const sceneStyleSchema = z.object({
 const lineSchema = z.object({ kind: z.literal("line"), to: pointSchema });
 const bezierSchema = z.object({ kind: z.literal("bezier"), cp1: pointSchema, cp2: pointSchema, to: pointSchema });
 const arcSchema = z.object({ kind: z.literal("arc"), control: pointSchema, to: pointSchema });
+const curveThroughPointsSchema = z.object({
+  kind: z.literal("curveThroughPoints"),
+  points: z.array(pointSchema),
+  to: pointSchema,
+});
 
 const scenePathSchema = z.object({
   id: z.string(),
@@ -114,7 +127,7 @@ const scenePathSchema = z.object({
   style: sceneStyleSchema,
   paint: z.enum(["fill", "stroke", "fill-stroke"]),
   start: pointSchema,
-  segments: z.array(z.discriminatedUnion("kind", [lineSchema, bezierSchema, arcSchema])),
+  segments: z.array(z.discriminatedUnion("kind", [lineSchema, bezierSchema, arcSchema, curveThroughPointsSchema])),
   closed: z.boolean(),
   shapeId: z.string().nullable(),
 });
@@ -137,6 +150,13 @@ const sceneCommandSchema = z.discriminatedUnion("kind", [
     cp1: pointSchema,
     cp2: pointSchema,
     to: pointSchema,
+    pathId: z.string(),
+    segmentIndex: z.number(),
+  }),
+  z.object({
+    id: z.string(),
+    kind: z.literal("curveThroughPoints"),
+    points: z.array(pointSchema),
     pathId: z.string(),
     segmentIndex: z.number(),
   }),
@@ -204,6 +224,9 @@ export const cloneScene = (scene: PlaygroundScene): PlaygroundScene => ({
       if (segment.kind === "bezier") {
         return { ...segment, cp1: { ...segment.cp1 }, cp2: { ...segment.cp2 }, to: { ...segment.to } };
       }
+      if (segment.kind === "curveThroughPoints") {
+        return { ...segment, points: segment.points.map((point) => ({ ...point })), to: { ...segment.to } };
+      }
       return { ...segment, control: { ...segment.control }, to: { ...segment.to } };
     }),
   })),
@@ -215,6 +238,9 @@ export const cloneScene = (scene: PlaygroundScene): PlaygroundScene => ({
   commands: scene.commands.map((command) => {
     if (command.kind === "bezierCurveTo") {
       return { ...command, cp1: { ...command.cp1 }, cp2: { ...command.cp2 }, to: { ...command.to } };
+    }
+    if (command.kind === "curveThroughPoints") {
+      return { ...command, points: command.points.map((point) => ({ ...point })) };
     }
     if (command.kind === "arc") {
       return {

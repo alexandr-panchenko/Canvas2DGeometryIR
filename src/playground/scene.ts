@@ -22,6 +22,62 @@ const normalizedPositiveAngle = (angle: number): number => {
   return normalized < 0 ? normalized + fullTurn : normalized;
 };
 
+const curveThroughPointsTension = 0.5;
+
+type CurveThroughPointsGeometrySegment =
+  | { readonly kind: "line"; readonly from: Point; readonly to: Point }
+  | { readonly kind: "bezier"; readonly from: Point; readonly cp1: Point; readonly cp2: Point; readonly to: Point };
+
+export const resolveCurveThroughPointsSegments = (start: Point, points: readonly Point[]): CurveThroughPointsGeometrySegment[] => {
+  const anchors = [start, ...points];
+  if (anchors.length < 2) {
+    return [];
+  }
+  if (anchors.length === 2) {
+    return [{ kind: "line", from: anchors[0]!, to: anchors[1]! }];
+  }
+
+  const segments: CurveThroughPointsGeometrySegment[] = [];
+  for (let index = 0; index < anchors.length - 1; index += 1) {
+    const from = anchors[index]!;
+    const to = anchors[index + 1]!;
+    const previous = anchors[index - 1] ?? from;
+    const next = anchors[index + 2] ?? to;
+    const cp1 = {
+      x: from.x + ((to.x - previous.x) * curveThroughPointsTension) / 6,
+      y: from.y + ((to.y - previous.y) * curveThroughPointsTension) / 6,
+    };
+    const cp2 = {
+      x: to.x - ((next.x - from.x) * curveThroughPointsTension) / 6,
+      y: to.y - ((next.y - from.y) * curveThroughPointsTension) / 6,
+    };
+    segments.push({ kind: "bezier", from, cp1, cp2, to });
+  }
+  return segments;
+};
+
+const appendCurveThroughPointsToContext = (
+  context: Canvas2DGeometryIRContext,
+  start: Point,
+  points: readonly Point[],
+): void => {
+  const segments = resolveCurveThroughPointsSegments(start, points);
+  for (const segment of segments) {
+    if (segment.kind === "line") {
+      context.lineTo(segment.to.x, segment.to.y);
+      continue;
+    }
+    context.bezierCurveTo(
+      segment.cp1.x,
+      segment.cp1.y,
+      segment.cp2.x,
+      segment.cp2.y,
+      segment.to.x,
+      segment.to.y,
+    );
+  }
+};
+
 export const resolveArcThroughPoint = (start: Point, control: Point, end: Point): ResolvedArcSegment | null => {
   const ax = start.x;
   const ay = start.y;
@@ -142,6 +198,19 @@ const pushPathCommands = (
       return;
     }
 
+    if (segment.kind === "curveThroughPoints") {
+      commands.push({
+        id: `cmd-${commandIndex.value}`,
+        kind: "curveThroughPoints",
+        points: segment.points.map((point) => ({ ...point })),
+        pathId: path.id,
+        segmentIndex,
+      });
+      current = segment.to;
+      commandIndex.value += 1;
+      return;
+    }
+
     const resolved = resolveArcThroughPoint(current, segment.control, segment.to);
     commands.push({
       id: `cmd-${commandIndex.value}`,
@@ -211,17 +280,21 @@ export const syncSceneCommands = (scene: PlaygroundScene): PlaygroundScene => {
 export const sceneToDocument = (scene: PlaygroundScene): GeometryDocument => {
   const commands = buildSceneCommands(scene);
   const context = new Canvas2DGeometryIRContext();
+  let currentPoint: Point | null = null;
 
   for (const command of commands) {
     switch (command.kind) {
       case "beginPath":
         context.beginPath();
+        currentPoint = null;
         break;
       case "moveTo":
         context.moveTo(command.x, command.y);
+        currentPoint = { x: command.x, y: command.y };
         break;
       case "lineTo":
         context.lineTo(command.x, command.y);
+        currentPoint = { x: command.x, y: command.y };
         break;
       case "bezierCurveTo":
         context.bezierCurveTo(
@@ -232,13 +305,24 @@ export const sceneToDocument = (scene: PlaygroundScene): GeometryDocument => {
           command.to.x,
           command.to.y,
         );
+        currentPoint = { x: command.to.x, y: command.to.y };
         break;
+      case "curveThroughPoints": {
+        const path = scene.paths.find((entry) => entry.id === command.pathId);
+        const segment = path?.segments[command.segmentIndex];
+        if (segment?.kind === "curveThroughPoints" && currentPoint !== null) {
+          appendCurveThroughPointsToContext(context, currentPoint, command.points);
+          currentPoint = command.points[command.points.length - 1] ?? currentPoint;
+        }
+        break;
+      }
       case "arc":
         if (!command.valid || command.center === null || command.radius === null) {
           const path = scene.paths.find((entry) => entry.id === command.pathId);
           const segment = path?.segments[command.segmentIndex];
           if (segment?.kind === "arc") {
             context.lineTo(segment.to.x, segment.to.y);
+            currentPoint = { x: segment.to.x, y: segment.to.y };
           }
           break;
         }
@@ -250,9 +334,14 @@ export const sceneToDocument = (scene: PlaygroundScene): GeometryDocument => {
           command.endAngle ?? 0,
           command.counterclockwise ?? false,
         );
+        currentPoint = {
+          x: command.center.x + Math.cos(command.endAngle ?? 0) * (command.radius ?? 0),
+          y: command.center.y + Math.sin(command.endAngle ?? 0) * (command.radius ?? 0),
+        };
         break;
       case "closePath":
         context.closePath();
+        currentPoint = null;
         break;
       case "fill":
         context.fillStyle = command.style.fillStyle;
