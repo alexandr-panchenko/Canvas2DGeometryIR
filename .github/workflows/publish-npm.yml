@@ -1,0 +1,67 @@
+name: Publish Package
+
+on:
+  push:
+    branches:
+      - main
+      - trunk
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js for npm publish
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run tests
+        run: bun test
+
+      - name: Build package
+        run: bun run build
+
+      - name: Set CI package version
+        run: |
+          bun --eval '
+          import { readFileSync, writeFileSync } from "node:fs";
+
+          const packageJsonPath = "package.json";
+          const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+            version: string;
+          };
+          const [major, minor] = packageJson.version.split(".");
+          const runNumber = process.env.GITHUB_RUN_NUMBER;
+
+          if (!major || !minor || !runNumber) {
+            throw new Error("Expected base package version and GITHUB_RUN_NUMBER.");
+          }
+
+          packageJson.version = `${major}.${minor}.${runNumber}`;
+          writeFileSync(
+            packageJsonPath,
+            `${JSON.stringify(packageJson, null, 2)}\n`,
+            "utf8",
+          );
+          '
+
+      - name: Publish to npm
+        if: github.event_name != 'workflow_dispatch' && github.run_attempt == 1
+        run: npm publish --access public

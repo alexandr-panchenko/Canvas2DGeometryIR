@@ -2,11 +2,30 @@
   "name": "canvas2d-geometry-ir",
   "version": "0.1.0",
   "description": "Deterministic Canvas-like recording and geometry IR engine",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alexandr-panchenko/Canvas2DGeometryIR"
+  },
   "type": "module",
   "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "build": "rm -rf ./dist && bun build ./src/index.ts --outdir ./dist --target bun && bunx tsc --emitDeclarationOnly",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit",
     "playground:build": "bun run playground/build.ts",
