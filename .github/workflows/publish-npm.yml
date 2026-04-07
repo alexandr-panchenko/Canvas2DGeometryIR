@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   publish:
@@ -65,3 +64,5 @@ jobs:
       - name: Publish to npm
         if: github.event_name != 'workflow_dispatch' && github.run_attempt == 1
         run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

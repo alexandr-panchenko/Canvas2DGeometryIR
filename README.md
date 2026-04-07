@@ -109,26 +109,19 @@ After that, each push to `main` will publish the latest playground build.
 
 ## npm publishing
 
-The repository also includes `/.github/workflows/publish-npm.yml` for package publishing through npm Trusted Publishing.
+The repository also includes `/.github/workflows/publish-npm.yml` for package publishing to npm.
 
-To enable Trusted Publishing on npmjs.com:
+To enable npm publishing in GitHub:
 
-1. Sign in to npmjs.com.
-2. Open the package settings for `canvas2d-geometry-ir`.
-3. Go to the **Trusted publishers** section.
-4. Add a GitHub trusted publisher with these exact values:
-   - Owner or organization: `alexandr-panchenko`
-   - Repository: `Canvas2DGeometryIR`
-   - Workflow filename: `publish-npm.yml`
-   - Environment name: leave empty unless you later add a GitHub Actions environment to this workflow
-5. Save the trusted publisher entry.
+1. Create an npm automation or granular access token that can publish this package and is allowed to bypass 2FA for publishing.
+2. Add it to the repository secrets as `NPM_TOKEN`.
+3. Push to `main` or `trunk`.
 
 Important details:
 
 - `package.json` must keep the repository URL exactly as `https://github.com/alexandr-panchenko/Canvas2DGeometryIR`
-- the workflow must run on a GitHub-hosted runner
-- the workflow requests `id-token: write` so GitHub can mint the OIDC token npm uses for publish authentication
-- no `NPM_TOKEN` repository secret is needed
+- the workflow publishes with `NODE_AUTH_TOKEN` from the `NPM_TOKEN` GitHub secret
+- use a token that can bypass your npm publish 2FA requirement, otherwise npm will reject the publish
 
 Each eligible push to `main` or `trunk` will:
 
