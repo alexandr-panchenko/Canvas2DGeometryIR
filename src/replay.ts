@@ -7,11 +7,16 @@ export interface CanvasLikeReplayTarget {
   bezierCurveTo(cp1x: number, cp1y: number, cp2x: number, cp2y: number, x: number, y: number): void;
   arc(x: number, y: number, radius: number, startAngle: number, endAngle: number, counterclockwise?: boolean): void;
   closePath(): void;
-  fill(): void;
+  fill(fillRule?: "nonzero" | "evenodd"): void;
   stroke(): void;
   setFillStyle(value: string): void;
   setStrokeStyle(value: string): void;
   setLineWidth(value: number): void;
+  setLineDash(value: readonly number[]): void;
+  setLineCap(value: "butt" | "round" | "square"): void;
+  setLineJoin(value: "miter" | "round" | "bevel"): void;
+  setMiterLimit(value: number): void;
+  setGlobalAlpha(value: number): void;
 }
 
 const replaySegment = (segment: Segment, target: CanvasLikeReplayTarget): void => {
@@ -37,6 +42,10 @@ export const replayDrawOp = (drawOp: DrawOp, target: CanvasLikeReplayTarget): vo
   target.setFillStyle(drawOp.style.fillStyle);
   target.setStrokeStyle(drawOp.style.strokeStyle);
   target.setLineWidth(drawOp.style.lineWidth);
+  target.setLineDash(drawOp.style.lineDash);
+  target.setLineCap(drawOp.style.lineCap);
+  target.setLineJoin(drawOp.style.lineJoin);
+  target.setMiterLimit(drawOp.style.miterLimit);
   target.beginPath();
 
   for (const subpath of drawOp.path.subpaths) {
@@ -50,8 +59,10 @@ export const replayDrawOp = (drawOp: DrawOp, target: CanvasLikeReplayTarget): vo
   }
 
   if (drawOp.paint === "fill") {
-    target.fill();
+    target.setGlobalAlpha(drawOp.style.fillOpacity);
+    target.fill(drawOp.fillRule);
   } else {
+    target.setGlobalAlpha(drawOp.style.strokeOpacity);
     target.stroke();
   }
 };

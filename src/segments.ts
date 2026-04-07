@@ -1,5 +1,5 @@
 import { clamp01, distance, expandRectWithPoint, lerpPoint, rectFromPoint, EPSILON } from "./math";
-import type { AnchorCandidate, ArcSegment, ClosestPointResult, Point, Rect, Segment } from "./types";
+import type { AnchorCandidate, ArcSegment, ClosestPointResult, Point, Rect, Segment, Vector } from "./types";
 
 export const segmentStart = (segment: Segment): Point => {
   switch (segment.kind) {
@@ -35,6 +35,30 @@ const cubicPoint = (from: Point, cp1: Point, cp2: Point, to: Point, t: number): 
   const p123 = lerpPoint(p12, p23, t);
   return lerpPoint(p012, p123, t);
 };
+
+const cubicDerivative = (from: Point, cp1: Point, cp2: Point, to: Point, t: number): Vector => {
+  const mt = 1 - t;
+  return {
+    x:
+      3 * mt * mt * (cp1.x - from.x) +
+      6 * mt * t * (cp2.x - cp1.x) +
+      3 * t * t * (to.x - cp2.x),
+    y:
+      3 * mt * mt * (cp1.y - from.y) +
+      6 * mt * t * (cp2.y - cp1.y) +
+      3 * t * t * (to.y - cp2.y),
+  };
+};
+
+const normalizeVector = (vector: Vector): Vector => {
+  const length = Math.hypot(vector.x, vector.y);
+  if (length <= EPSILON) {
+    return { x: 1, y: 0 };
+  }
+  return { x: vector.x / length, y: vector.y / length };
+};
+
+const leftNormal = (vector: Vector): Vector => normalizeVector({ x: -vector.y, y: vector.x });
 
 const normalizeArcAngles = (segment: ArcSegment): { start: number; end: number } => {
   let { startAngle: start, endAngle: end } = segment;
@@ -109,6 +133,18 @@ const closestPointOnLine = (from: Point, to: Point, p: Point): Point => {
   return { x: from.x + t * vx, y: from.y + t * vy };
 };
 
+const closestPointOnLineDetail = (from: Point, to: Point, p: Point): { point: Point; tangent: Vector } => {
+  const vx = to.x - from.x;
+  const vy = to.y - from.y;
+  const denom = vx * vx + vy * vy;
+  const tangent = normalizeVector({ x: vx, y: vy });
+  if (denom <= EPSILON) {
+    return { point: from, tangent };
+  }
+  const t = clamp01(((p.x - from.x) * vx + (p.y - from.y) * vy) / denom);
+  return { point: { x: from.x + t * vx, y: from.y + t * vy }, tangent };
+};
+
 export const closestPointOnSegment = (segment: Segment, p: Point): Point => {
   if (segment.kind === "line") {
     return closestPointOnLine(segment.from, segment.to, p);
@@ -125,6 +161,55 @@ export const closestPointOnSegment = (segment: Segment, p: Point): Point => {
     }
   }
   return best;
+};
+
+export const closestPointDetailOnSegment = (
+  segment: Segment,
+  p: Point,
+): { point: Point; tangent: Vector; normal: Vector } => {
+  if (segment.kind === "line") {
+    const detail = closestPointOnLineDetail(segment.from, segment.to, p);
+    return { ...detail, normal: leftNormal(detail.tangent) };
+  }
+
+  if (segment.kind === "arc") {
+    let angle = Math.atan2(p.y - segment.center.y, p.x - segment.center.x);
+    if (!inArcSweep(angle, segment)) {
+      const start = segmentStart(segment);
+      const end = segmentEnd(segment);
+      const startDistance = distance(start, p);
+      const endDistance = distance(end, p);
+      const point = startDistance <= endDistance ? start : end;
+      angle = point === start ? segment.startAngle : segment.endAngle;
+    }
+    const point = {
+      x: segment.center.x + Math.cos(angle) * segment.radius,
+      y: segment.center.y + Math.sin(angle) * segment.radius,
+    };
+    const direction = segment.counterclockwise ? -1 : 1;
+    const tangent = normalizeVector({
+      x: -Math.sin(angle) * direction,
+      y: Math.cos(angle) * direction,
+    });
+    return { point, tangent, normal: leftNormal(tangent) };
+  }
+
+  const steps = Math.max(20, Math.ceil(distance(segment.from, segment.to) / 4));
+  let bestT = 0;
+  let bestPoint = segment.from;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    const candidate = cubicPoint(segment.from, segment.cp1, segment.cp2, segment.to, t);
+    const candidateDistance = distance(candidate, p);
+    if (candidateDistance < bestDistance) {
+      bestDistance = candidateDistance;
+      bestT = t;
+      bestPoint = candidate;
+    }
+  }
+  const tangent = normalizeVector(cubicDerivative(segment.from, segment.cp1, segment.cp2, segment.to, bestT));
+  return { point: bestPoint, tangent, normal: leftNormal(tangent) };
 };
 
 export const segmentAnchors = (segment: Segment): Point[] => {
@@ -153,6 +238,13 @@ export const anchorCandidatesFromSegment = (segment: Segment, opId: string): Anc
   }));
 
 export const closestResultFromSegment = (segment: Segment, p: Point, opId: string): ClosestPointResult => {
-  const point = closestPointOnSegment(segment, p);
-  return { point, distance: distance(point, p), opId, segmentKind: segment.kind };
+  const detail = closestPointDetailOnSegment(segment, p);
+  return {
+    point: detail.point,
+    distance: distance(detail.point, p),
+    opId,
+    segmentKind: segment.kind,
+    tangent: detail.tangent,
+    normal: detail.normal,
+  };
 };

@@ -10,6 +10,11 @@ export interface Rect {
   readonly maxY: number;
 }
 
+export interface Vector {
+  readonly x: number;
+  readonly y: number;
+}
+
 export interface Matrix2D {
   readonly a: number;
   readonly b: number;
@@ -58,11 +63,18 @@ export interface PaintStyle {
   readonly fillStyle: string;
   readonly strokeStyle: string;
   readonly lineWidth: number;
+  readonly lineDash: readonly number[];
+  readonly lineCap: "butt" | "round" | "square";
+  readonly lineJoin: "miter" | "round" | "bevel";
+  readonly miterLimit: number;
+  readonly fillOpacity: number;
+  readonly strokeOpacity: number;
 }
 
 export interface DrawOp {
   readonly opId: string;
   readonly paint: "fill" | "stroke";
+  readonly fillRule: "nonzero" | "evenodd";
   readonly path: PathGeometry;
   readonly style: PaintStyle;
 }
@@ -77,10 +89,20 @@ export interface ClosestPointResult {
   readonly distance: number;
   readonly opId: string;
   readonly segmentKind: Segment["kind"];
+  readonly tangent: Vector;
+  readonly normal: Vector;
 }
 
 export interface AnchorCandidate {
   readonly point: Point;
   readonly type: "vertex" | "arc-extreme";
   readonly opId: string;
+}
+
+export interface RectQueryResult {
+  readonly opId: string;
+  readonly paint: "fill" | "stroke";
+  readonly intersects: boolean;
+  readonly containsRect: boolean;
+  readonly enclosedByRect: boolean;
 }

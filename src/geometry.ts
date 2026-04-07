@@ -1,7 +1,7 @@
-import { distance, mergeRects } from "./math";
+import { distance, expandRect, mergeRects, rectContainsPoint, rectContainsRect, rectIntersectsRect } from "./math";
 import { flattenSubpathBoundary, pathBounds } from "./path";
 import { anchorCandidatesFromSegment, closestResultFromSegment } from "./segments";
-import type { AnchorCandidate, ClosestPointResult, GeometryDocument, Point, Rect } from "./types";
+import type { AnchorCandidate, ClosestPointResult, GeometryDocument, Point, Rect, RectQueryResult } from "./types";
 
 const pointOnPolylineDistance = (polyline: readonly Point[], point: Point): number => {
   let best = Number.POSITIVE_INFINITY;
@@ -31,6 +31,47 @@ const isPointInPolygon = (polygon: readonly Point[], point: Point): boolean => {
   return inside;
 };
 
+const windingContribution = (a: Point, b: Point, point: Point): number => {
+  if (a.y <= point.y) {
+    if (b.y > point.y && (b.x - a.x) * (point.y - a.y) - (point.x - a.x) * (b.y - a.y) > 0) {
+      return 1;
+    }
+    return 0;
+  }
+  if (b.y <= point.y && (b.x - a.x) * (point.y - a.y) - (point.x - a.x) * (b.y - a.y) < 0) {
+    return -1;
+  }
+  return 0;
+};
+
+const pointInFilledPath = (
+  path: GeometryDocument["drawOps"][number]["path"],
+  fillRule: "nonzero" | "evenodd",
+  point: Point,
+): boolean => {
+  if (fillRule === "evenodd") {
+    let inside = false;
+    for (const subpath of path.subpaths) {
+      if (subpath.segments.length === 0) continue;
+      const polygon = flattenSubpathBoundary(subpath, 0.5);
+      if (isPointInPolygon(polygon, point)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  let winding = 0;
+  for (const subpath of path.subpaths) {
+    if (subpath.segments.length === 0) continue;
+    const polygon = flattenSubpathBoundary(subpath, 0.5);
+    for (let i = 1; i < polygon.length; i += 1) {
+      winding += windingContribution(polygon[i - 1]!, polygon[i]!, point);
+    }
+  }
+  return winding !== 0;
+};
+
 const intersectLineSegments = (a1: Point, a2: Point, b1: Point, b2: Point): Point | null => {
   const d = (a2.x - a1.x) * (b2.y - b1.y) - (a2.y - a1.y) * (b2.x - b1.x);
   if (Math.abs(d) < 1e-8) return null;
@@ -43,7 +84,7 @@ const intersectLineSegments = (a1: Point, a2: Point, b1: Point, b2: Point): Poin
 export class GeometryEngine {
   constructor(private readonly document: GeometryDocument) {}
 
-  getBounds(): Rect | null {
+  getGeometryBounds(): Rect | null {
     let total: Rect | null = null;
     for (const op of this.document.drawOps) {
       const bounds = pathBounds(op.path);
@@ -53,15 +94,26 @@ export class GeometryEngine {
     return total;
   }
 
+  getPaintBounds(): Rect | null {
+    let total: Rect | null = null;
+    for (const op of this.document.drawOps) {
+      const bounds = pathBounds(op.path);
+      if (bounds === null) continue;
+      const paintBounds = op.paint === "stroke" ? expandRect(bounds, op.style.lineWidth / 2) : bounds;
+      total = total === null ? paintBounds : mergeRects(total, paintBounds);
+    }
+    return total;
+  }
+
+  getBounds(): Rect | null {
+    return this.getPaintBounds();
+  }
+
   hitTestPoint(point: Point): { opId: string; paint: "fill" | "stroke" }[] {
     const hits: { opId: string; paint: "fill" | "stroke" }[] = [];
     for (const op of this.document.drawOps) {
       if (op.paint === "fill") {
-        const fillHit = op.path.subpaths.some((subpath) => {
-          if (subpath.segments.length === 0) return false;
-          const polygon = flattenSubpathBoundary(subpath, 0.5);
-          return isPointInPolygon(polygon, point);
-        });
+        const fillHit = pointInFilledPath(op.path, op.fillRule, point);
         if (fillHit) hits.push({ opId: op.opId, paint: op.paint });
       } else {
         const strokeHit = op.path.subpaths.some((subpath) => {
@@ -72,6 +124,68 @@ export class GeometryEngine {
       }
     }
     return hits;
+  }
+
+  queryRect(rect: Rect): RectQueryResult[] {
+    const rectCorners = [
+      { x: rect.minX, y: rect.minY },
+      { x: rect.maxX, y: rect.minY },
+      { x: rect.maxX, y: rect.maxY },
+      { x: rect.minX, y: rect.maxY },
+    ];
+    const rectEdges = [
+      [rectCorners[0]!, rectCorners[1]!],
+      [rectCorners[1]!, rectCorners[2]!],
+      [rectCorners[2]!, rectCorners[3]!],
+      [rectCorners[3]!, rectCorners[0]!],
+    ] as const;
+
+    return this.document.drawOps.flatMap((op) => {
+      const geometryBounds = pathBounds(op.path);
+      if (geometryBounds === null) {
+        return [];
+      }
+      const paintBounds = op.paint === "stroke" ? expandRect(geometryBounds, op.style.lineWidth / 2) : geometryBounds;
+      if (!rectIntersectsRect(paintBounds, rect)) {
+        return [];
+      }
+
+      let intersects = false;
+      let containsRect = false;
+      let enclosedByRect = rectContainsRect(rect, paintBounds);
+
+      if (op.paint === "fill") {
+        containsRect = rectCorners.every((corner) => pointInFilledPath(op.path, op.fillRule, corner));
+        intersects =
+          containsRect ||
+          rectCorners.some((corner) => pointInFilledPath(op.path, op.fillRule, corner)) ||
+          op.path.subpaths.some((subpath) => {
+            const polyline = flattenSubpathBoundary(subpath, 0.5);
+            return polyline.some((point) => rectContainsPoint(rect, point));
+          });
+      } else {
+        intersects = op.path.subpaths.some((subpath) => {
+          const polyline = flattenSubpathBoundary(subpath, 0.5);
+          if (polyline.some((point) => rectContainsPoint(rect, point))) {
+            return true;
+          }
+          for (let i = 1; i < polyline.length; i += 1) {
+            for (const edge of rectEdges) {
+              if (intersectLineSegments(polyline[i - 1]!, polyline[i]!, edge[0], edge[1]) !== null) {
+                return true;
+              }
+            }
+          }
+          return false;
+        });
+      }
+
+      if (!intersects && !containsRect && !enclosedByRect) {
+        return [];
+      }
+
+      return [{ opId: op.opId, paint: op.paint, intersects, containsRect, enclosedByRect }];
+    });
   }
 
   getPathIntersections(opIdA: string, opIdB: string): Point[] {

@@ -42,6 +42,31 @@ export const mergeRects = (lhs: Rect, rhs: Rect): Rect => ({
   maxY: Math.max(lhs.maxY, rhs.maxY),
 });
 
+export const expandRect = (rect: Rect, padding: number): Rect => ({
+  minX: rect.minX - padding,
+  minY: rect.minY - padding,
+  maxX: rect.maxX + padding,
+  maxY: rect.maxY + padding,
+});
+
+export const rectContainsPoint = (rect: Rect, point: Point): boolean =>
+  point.x >= rect.minX - EPSILON &&
+  point.x <= rect.maxX + EPSILON &&
+  point.y >= rect.minY - EPSILON &&
+  point.y <= rect.maxY + EPSILON;
+
+export const rectContainsRect = (outer: Rect, inner: Rect): boolean =>
+  inner.minX >= outer.minX - EPSILON &&
+  inner.minY >= outer.minY - EPSILON &&
+  inner.maxX <= outer.maxX + EPSILON &&
+  inner.maxY <= outer.maxY + EPSILON;
+
+export const rectIntersectsRect = (lhs: Rect, rhs: Rect): boolean =>
+  lhs.minX <= rhs.maxX + EPSILON &&
+  lhs.maxX >= rhs.minX - EPSILON &&
+  lhs.minY <= rhs.maxY + EPSILON &&
+  lhs.maxY >= rhs.minY - EPSILON;
+
 export const distance = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y);
 
 export const clamp01 = (t: number): number => Math.max(0, Math.min(1, t));

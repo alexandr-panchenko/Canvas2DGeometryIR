@@ -1,4 +1,4 @@
-import { applyMatrix, identityMatrix, multiplyMatrix, rotationMatrix, scalingMatrix, translationMatrix } from "./math";
+import { applyMatrix, identityMatrix, multiplyMatrix, rotationMatrix, scalingMatrix, translationMatrix, EPSILON } from "./math";
 import { PathBuilder } from "./path";
 import type { DrawOp, GeometryDocument, Matrix2D, PaintStyle, Point } from "./types";
 
@@ -11,7 +11,72 @@ const defaultStyle = (): PaintStyle => ({
   fillStyle: "#000000",
   strokeStyle: "#000000",
   lineWidth: 1,
+  lineDash: [],
+  lineCap: "butt",
+  lineJoin: "miter",
+  miterLimit: 10,
+  fillOpacity: 1,
+  strokeOpacity: 1,
 });
+
+const isCirclePreservingTransform = (matrix: Matrix2D): boolean => {
+  const column1Length = Math.hypot(matrix.a, matrix.b);
+  const column2Length = Math.hypot(matrix.c, matrix.d);
+  const dot = matrix.a * matrix.c + matrix.b * matrix.d;
+  return Math.abs(column1Length - column2Length) <= 1e-6 && Math.abs(dot) <= 1e-6;
+};
+
+const normalizeArcSweep = (startAngle: number, endAngle: number, counterclockwise: boolean): { start: number; delta: number } => {
+  const fullTurn = Math.PI * 2;
+  let delta = endAngle - startAngle;
+  if (!counterclockwise && delta < 0) {
+    delta += fullTurn;
+  }
+  if (counterclockwise && delta > 0) {
+    delta -= fullTurn;
+  }
+  if (Math.abs(delta) >= fullTurn - 1e-8) {
+    delta = counterclockwise ? -fullTurn : fullTurn;
+  }
+  return { start: startAngle, delta };
+};
+
+const cubicArcSegments = (
+  center: Point,
+  radius: number,
+  startAngle: number,
+  endAngle: number,
+  counterclockwise: boolean,
+): Array<{ from: Point; cp1: Point; cp2: Point; to: Point }> => {
+  const { start, delta } = normalizeArcSweep(startAngle, endAngle, counterclockwise);
+  const segmentCount = Math.max(1, Math.ceil(Math.abs(delta) / (Math.PI / 2)));
+  const step = delta / segmentCount;
+  const segments: Array<{ from: Point; cp1: Point; cp2: Point; to: Point }> = [];
+
+  for (let index = 0; index < segmentCount; index += 1) {
+    const theta1 = start + step * index;
+    const theta2 = theta1 + step;
+    const alpha = (4 / 3) * Math.tan((theta2 - theta1) / 4);
+    const cos1 = Math.cos(theta1);
+    const sin1 = Math.sin(theta1);
+    const cos2 = Math.cos(theta2);
+    const sin2 = Math.sin(theta2);
+
+    const from = { x: center.x + radius * cos1, y: center.y + radius * sin1 };
+    const to = { x: center.x + radius * cos2, y: center.y + radius * sin2 };
+    const cp1 = {
+      x: from.x - radius * alpha * sin1,
+      y: from.y + radius * alpha * cos1,
+    };
+    const cp2 = {
+      x: to.x + radius * alpha * sin2,
+      y: to.y - radius * alpha * cos2,
+    };
+    segments.push({ from, cp1, cp2, to });
+  }
+
+  return segments;
+};
 
 export class Canvas2DGeometryIRContext {
   private drawOps: DrawOp[] = [];
@@ -31,6 +96,30 @@ export class Canvas2DGeometryIRContext {
 
   set lineWidth(value: number) {
     this.state = { ...this.state, style: { ...this.state.style, lineWidth: value } };
+  }
+
+  set lineDash(value: readonly number[]) {
+    this.state = { ...this.state, style: { ...this.state.style, lineDash: [...value] } };
+  }
+
+  set lineCap(value: "butt" | "round" | "square") {
+    this.state = { ...this.state, style: { ...this.state.style, lineCap: value } };
+  }
+
+  set lineJoin(value: "miter" | "round" | "bevel") {
+    this.state = { ...this.state, style: { ...this.state.style, lineJoin: value } };
+  }
+
+  set miterLimit(value: number) {
+    this.state = { ...this.state, style: { ...this.state.style, miterLimit: value } };
+  }
+
+  set fillOpacity(value: number) {
+    this.state = { ...this.state, style: { ...this.state.style, fillOpacity: value } };
+  }
+
+  set strokeOpacity(value: number) {
+    this.state = { ...this.state, style: { ...this.state.style, strokeOpacity: value } };
   }
 
   beginPath(): void {
@@ -71,6 +160,31 @@ export class Canvas2DGeometryIRContext {
   }
 
   arc(x: number, y: number, radius: number, startAngle: number, endAngle: number, counterclockwise = false): void {
+    if (!isCirclePreservingTransform(this.state.matrix)) {
+      const center = { x, y };
+      const lowered = cubicArcSegments(center, radius, startAngle, endAngle, counterclockwise);
+      if (lowered.length === 0) {
+        return;
+      }
+      const startPoint = applyMatrix(this.state.matrix, lowered[0]!.from);
+      if (this.currentPoint !== null && (Math.abs(this.currentPoint.x - startPoint.x) > EPSILON || Math.abs(this.currentPoint.y - startPoint.y) > EPSILON)) {
+        this.path.addSegment({ kind: "line", from: this.currentPoint, to: startPoint });
+      } else if (this.currentPoint === null) {
+        this.path.moveTo(startPoint);
+      }
+      for (const segment of lowered) {
+        this.path.addSegment({
+          kind: "bezier",
+          from: applyMatrix(this.state.matrix, segment.from),
+          cp1: applyMatrix(this.state.matrix, segment.cp1),
+          cp2: applyMatrix(this.state.matrix, segment.cp2),
+          to: applyMatrix(this.state.matrix, segment.to),
+        });
+      }
+      this.currentPoint = applyMatrix(this.state.matrix, lowered[lowered.length - 1]!.to);
+      return;
+    }
+
     const center = applyMatrix(this.state.matrix, { x, y });
     const sx = center.x + Math.cos(startAngle) * radius;
     const sy = center.y + Math.sin(startAngle) * radius;
@@ -96,16 +210,19 @@ export class Canvas2DGeometryIRContext {
     this.currentPoint = null;
   }
 
-  fill(): void {
-    this.commitPath("fill");
+  fill(fillRule: DrawOp["fillRule"] = "nonzero"): void {
+    this.commitPath("fill", fillRule);
   }
 
   stroke(): void {
-    this.commitPath("stroke");
+    this.commitPath("stroke", "nonzero");
   }
 
   save(): void {
-    this.stack.push({ matrix: this.state.matrix, style: { ...this.state.style } });
+    this.stack.push({
+      matrix: this.state.matrix,
+      style: { ...this.state.style, lineDash: [...this.state.style.lineDash] },
+    });
   }
 
   restore(): void {
@@ -136,7 +253,10 @@ export class Canvas2DGeometryIRContext {
   getDocument(): GeometryDocument {
     return {
       version: 1,
-      drawOps: this.drawOps.map((op) => ({ ...op, style: { ...op.style } })),
+      drawOps: this.drawOps.map((op) => ({
+        ...op,
+        style: { ...op.style, lineDash: [...op.style.lineDash] },
+      })),
     };
   }
 
@@ -148,13 +268,14 @@ export class Canvas2DGeometryIRContext {
     this.opIndex = 0;
   }
 
-  private commitPath(paint: DrawOp["paint"]): void {
+  private commitPath(paint: DrawOp["paint"], fillRule: DrawOp["fillRule"]): void {
     if (this.path.isEmpty()) return;
     this.drawOps.push({
       opId: `op-${this.opIndex}`,
       paint,
+      fillRule,
       path: this.path.snapshotPath(),
-      style: { ...this.state.style },
+      style: { ...this.state.style, lineDash: [...this.state.style.lineDash] },
     });
     this.opIndex += 1;
   }

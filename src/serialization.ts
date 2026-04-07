@@ -38,11 +38,18 @@ const paintStyleSchema = z.object({
   fillStyle: z.string(),
   strokeStyle: z.string(),
   lineWidth: z.number().positive(),
+  lineDash: z.array(z.number().nonnegative()),
+  lineCap: z.enum(["butt", "round", "square"]),
+  lineJoin: z.enum(["miter", "round", "bevel"]),
+  miterLimit: z.number().positive(),
+  fillOpacity: z.number().min(0),
+  strokeOpacity: z.number().min(0),
 });
 
 const drawOpSchema = z.object({
   opId: z.string(),
   paint: z.enum(["fill", "stroke"]),
+  fillRule: z.enum(["nonzero", "evenodd"]),
   path: z.object({ subpaths: z.array(subpathSchema) }),
   style: paintStyleSchema,
 });

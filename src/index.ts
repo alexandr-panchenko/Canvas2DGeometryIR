@@ -2,6 +2,7 @@ export { Canvas2DGeometryIRContext } from "./context";
 export { GeometryEngine } from "./geometry";
 export { replayDocument, replayDrawOp } from "./replay";
 export { serializeDocument, deserializeDocument, geometryDocumentZodSchema } from "./serialization";
+export { drawOpToSvgElement, drawOpToSvgPathData, documentToSvg } from "./svg";
 
 export type {
   AnchorCandidate,
@@ -13,7 +14,9 @@ export type {
   PathGeometry,
   Point,
   Rect,
+  RectQueryResult,
   Segment,
+  Vector,
 } from "./types";
 export type { CanvasLikeReplayTarget } from "./replay";
 
